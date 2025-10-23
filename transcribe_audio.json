@@ -1,0 +1,205 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "audio-upload",
+        "options": {}
+      },
+      "name": "Receive Audio Upload",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "bucketName": "n8n-audio-transcripts",
+        "resource": "file",
+        "operation": "upload",
+        "fileName": "={{$json.data.fileName}}",
+        "fileContent": "binary",
+        "fileProperty": "data",
+        "options": {}
+      },
+      "name": "Upload to GCS",
+      "type": "n8n-nodes-base.googleCloudStorage",
+      "typeVersion": 1,
+      "position": [
+        480,
+        180
+      ],
+      "credentials": {
+        "googleCloudStorage": {
+          "id": "googleCloudStorage_CREDENTIALS_ID",
+          "name": "Google Cloud Storage Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "googleCloud",
+        "url": "https://speech.googleapis.com/v1/speech:longrunningrecognize",
+        "method": "POST",
+        "sendOnlySet": true,
+        "jsonBody": true,
+        "body": {
+          "config": {
+            "encoding": "MP3",
+            "sampleRateHertz": 16000,
+            "languageCode": "en-US",
+            "enableAutomaticPunctuation": true
+          },
+          "audio": {
+            "uri": "={{$node[\"Upload to GCS\"].json.gcs_uri}}"
+          }
+        },
+        "options": {}
+      },
+      "name": "Start Transcription Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        720,
+        180
+      ],
+      "credentials": {
+        "googleCloudApi": {
+          "id": "googleCloudServiceAccount_CREDENTIALS_ID",
+          "name": "Google Cloud Service Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "value": 10
+      },
+      "name": "Wait 10 Seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        960,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "googleCloud",
+        "url": "https://speech.googleapis.com/v1/operations/={{$node[\"Start Transcription Job\"].json.name}}",
+        "options": {}
+      },
+      "name": "Check Job Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1200,
+        300
+      ],
+      "credentials": {
+        "googleCloudApi": {
+          "id": "googleCloudServiceAccount_CREDENTIALS_ID",
+          "name": "Google Cloud Service Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": [
+          {
+            "value1": "={{$json.done}}",
+            "operation": "isTrue"
+          }
+        ]
+      },
+      "name": "Loop Until Done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "values": [
+          {
+            "name": "transcript",
+            "value": "={{$json.response.results[0].alternatives[0].transcript}}"
+          }
+        ]
+      },
+      "name": "Extract Transcript",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "responseMode": "responseNode",
+        "responseData": "allFields",
+        "node": "Extract Transcript",
+        "options": {}
+      },
+      "name": "Respond with Transcript",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Receive Audio Upload": [
+      [
+        "Upload to GCS",
+        0
+      ]
+    ],
+    "Upload to GCS": [
+      [
+        "Start Transcription Job",
+        0
+      ]
+    ],
+    "Start Transcription Job": [
+      [
+        "Wait 10 Seconds",
+        0
+      ]
+    ],
+    "Wait 10 Seconds": [
+      [
+        "Check Job Status",
+        0
+      ]
+    ],
+    "Check Job Status": [
+      [
+        "Loop Until Done?",
+        0
+      ]
+    ],
+    "Loop Until Done?": [
+      [
+        "Extract Transcript",
+        0
+      ],
+      [
+        "Wait 10 Seconds",
+        1
+      ]
+    ],
+    "Extract Transcript": [
+      [
+        "Respond with Transcript",
+        0
+      ]
+    ]
+  }
+}

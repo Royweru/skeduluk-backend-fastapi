@@ -1,0 +1,337 @@
+# app/services/auth_service.py
+import secrets
+import base64
+from datetime import datetime, timedelta
+from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from .. import models
+from ..auth import get_password_hash, verify_password
+from .email_service import emaill_service as EmailService
+
+
+class AuthService:
+    """Single authentication service handling all auth operations"""
+
+    @staticmethod
+    async def create_user_with_verification(
+        db: AsyncSession,
+        email: str,
+        username: str,
+        password: str
+    ) -> models.User:
+        """Create new user with email verification"""
+
+        # Generate verification token
+        verification_token = base64.urlsafe_b64encode(
+            secrets.token_bytes(32)
+        ).decode()
+        verification_expires = datetime.utcnow() + timedelta(hours=24)
+
+        # Set trial period (30 days from now)
+        trial_ends_at = datetime.utcnow() + timedelta(days=30)
+
+        # Create user
+        user = models.User(
+            email=email,
+            username=username,
+            hashed_password=get_password_hash(password),  # ← Uses your auth.py function
+            is_email_verified=False,
+            email_verification_token=verification_token,
+            email_verification_expires=verification_expires,
+            trial_ends_at=trial_ends_at,
+            plan="trial",
+            posts_limit=10,
+        )
+
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+
+        # Send verification email (wrapped in try-catch to not block user creation)
+        try:
+            await EmailService.send_verification_email(email, verification_token)
+        except Exception as e:
+            print(f"Failed to send verification email: {e}")
+
+        return user
+
+    @staticmethod
+    async def verify_email(db: AsyncSession, token: str) -> bool:
+        """Verify user email with token"""
+
+        result = await db.execute(
+            select(models.User).where(
+                models.User.email_verification_token == token
+            )
+        )
+        user = result.scalar_one_or_none()
+
+        if not user:
+            return False
+
+        if user.email_verification_expires and user.email_verification_expires < datetime.utcnow():
+            return False
+
+        user.is_email_verified = True
+        user.email_verification_token = None
+        user.email_verification_expires = None
+        user.updated_at = datetime.utcnow()
+
+        await db.commit()
+        return True
+
+    @staticmethod
+    async def resend_verification_email(db: AsyncSession, email: str) -> bool:
+        """Resend verification email"""
+
+        result = await db.execute(
+            select(models.User).where(models.User.email == email)
+        )
+        user = result.scalar_one_or_none()
+
+        if not user:
+            return False
+
+        if user.is_email_verified:
+            return False
+
+        verification_token = base64.urlsafe_b64encode(
+            secrets.token_bytes(32)
+        ).decode()
+        verification_expires = datetime.utcnow() + timedelta(hours=24)
+
+        user.email_verification_token = verification_token
+        user.email_verification_expires = verification_expires
+        user.updated_at = datetime.utcnow()
+
+        await db.commit()
+
+        try:
+            await EmailService.send_verification_email(email, verification_token)
+            return True
+        except Exception as e:
+            print(f"Failed to send verification email: {e}")
+            return False
+
+    @staticmethod
+    async def authenticate_user(
+        db: AsyncSession,
+        username: str,
+        password: str
+    ) -> Optional[models.User]:
+        """Authenticate user with username/email and password"""
+
+        # Try to find user by username or email
+        result = await db.execute(
+            select(models.User).where(
+                (models.User.username == username) | (models.User.email == username)
+            )
+        )
+        user = result.scalar_one_or_none()
+
+        if not user:
+            return None
+
+        # Verify password using auth.py function
+        if not verify_password(password, user.hashed_password):
+            return None
+
+        # Check if email is verified
+        if not user.is_email_verified:
+            return None
+
+        # Check if account is active
+        if not user.is_active:
+            return None
+
+        # Update last login
+        user.last_login = datetime.utcnow()
+        await db.commit()
+        await db.refresh(user)
+
+        return user
+
+    @staticmethod
+    async def get_user_by_username(db: AsyncSession, username: str) -> Optional[models.User]:
+        """Get user by username"""
+        result = await db.execute(
+            select(models.User).where(models.User.username == username)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_user_by_email(db: AsyncSession, email: str) -> Optional[models.User]:
+        """Get user by email"""
+        result = await db.execute(
+            select(models.User).where(models.User.email == email)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[models.User]:
+        """Get user by ID"""
+        result = await db.execute(
+            select(models.User).where(models.User.id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def initiate_password_reset(db: AsyncSession, email: str) -> bool:
+        """Initiate password reset"""
+
+        result = await db.execute(
+            select(models.User).where(models.User.email == email)
+        )
+        user = result.scalar_one_or_none()
+
+        if not user:
+            return True  # Don't reveal if user exists
+
+        reset_token = base64.urlsafe_b64encode(
+            secrets.token_bytes(32)
+        ).decode()
+        reset_expires = datetime.utcnow() + timedelta(hours=1)
+
+        user.password_reset_token = reset_token
+        user.password_reset_expires = reset_expires
+        user.updated_at = datetime.utcnow()
+
+        await db.commit()
+
+        try:
+            await EmailService.send_password_reset_email(email, reset_token)
+            return True
+        except Exception as e:
+            print(f"Failed to send password reset email: {e}")
+            return True
+
+    @staticmethod
+    async def reset_password(db: AsyncSession, token: str, new_password: str) -> bool:
+        """Reset password with token"""
+
+        result = await db.execute(
+            select(models.User).where(
+                models.User.password_reset_token == token
+            )
+        )
+        user = result.scalar_one_or_none()
+
+        if not user:
+            return False
+
+        if user.password_reset_expires and user.password_reset_expires < datetime.utcnow():
+            return False
+
+        # Update password using auth.py function
+        user.hashed_password = get_password_hash(new_password)
+        user.password_reset_token = None
+        user.password_reset_expires = None
+        user.updated_at = datetime.utcnow()
+
+        await db.commit()
+        return True
+
+    @staticmethod
+    async def change_password(
+        db: AsyncSession, 
+        user_id: int, 
+        old_password: str, 
+        new_password: str
+    ) -> bool:
+        """Change user password (requires old password)"""
+
+        user = await AuthService.get_user_by_id(db, user_id)
+
+        if not user:
+            return False
+
+        # Verify old password using auth.py function
+        if not verify_password(old_password, user.hashed_password):
+            return False
+
+        # Update to new password using auth.py function
+        user.hashed_password = get_password_hash(new_password)
+        user.updated_at = datetime.utcnow()
+
+        await db.commit()
+        return True
+
+    @staticmethod
+    async def update_user_profile(
+        db: AsyncSession,
+        user_id: int,
+        email: Optional[str] = None,
+        username: Optional[str] = None
+    ) -> Optional[models.User]:
+        """Update user profile information"""
+
+        user = await AuthService.get_user_by_id(db, user_id)
+
+        if not user:
+            return None
+
+        # Check if email is already taken
+        if email and email != user.email:
+            existing_user = await AuthService.get_user_by_email(db, email)
+            if existing_user:
+                raise ValueError("Email already in use")
+            
+            user.email = email
+            user.is_email_verified = False
+            
+            verification_token = base64.urlsafe_b64encode(
+                secrets.token_bytes(32)
+            ).decode()
+            verification_expires = datetime.utcnow() + timedelta(hours=24)
+            
+            user.email_verification_token = verification_token
+            user.email_verification_expires = verification_expires
+            
+            try:
+                await EmailService.send_verification_email(email, verification_token)
+            except Exception as e:
+                print(f"Failed to send verification email: {e}")
+
+        # Check if username is already taken
+        if username and username != user.username:
+            existing_user = await AuthService.get_user_by_username(db, username)
+            if existing_user:
+                raise ValueError("Username already in use")
+            user.username = username
+
+        user.updated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(user)
+
+        return user
+
+    @staticmethod
+    async def deactivate_account(db: AsyncSession, user_id: int) -> bool:
+        """Deactivate user account"""
+
+        user = await AuthService.get_user_by_id(db, user_id)
+
+        if not user:
+            return False
+
+        user.is_active = False
+        user.updated_at = datetime.utcnow()
+
+        await db.commit()
+        return True
+
+    @staticmethod
+    async def reactivate_account(db: AsyncSession, user_id: int) -> bool:
+        """Reactivate user account"""
+
+        user = await AuthService.get_user_by_id(db, user_id)
+
+        if not user:
+            return False
+
+        user.is_active = True
+        user.updated_at = datetime.utcnow()
+
+        await db.commit()
+        return True
