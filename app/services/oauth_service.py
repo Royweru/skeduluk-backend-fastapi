@@ -4,7 +4,7 @@ import httpx
 from typing import Dict, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime
+from datetime import datetime, timedelta
 from .. import models
 from ..config import settings
 
@@ -230,7 +230,6 @@ class OAuthService:
             connection.last_synced = datetime.utcnow()
         else:
             # Create new connection
-            from datetime import timedelta
             connection = models.SocialConnection(
                 user_id=user_id,
                 platform=platform.upper(),
@@ -294,37 +293,16 @@ class OAuthService:
                         connection.refresh_token = token_data.get("refresh_token")
                     
                     expires_in = token_data.get("expires_in")
+                    expires_in = token_data.get("expires_in")
                     if expires_in:
-                        from datetime import timedelta
                         connection.token_expires_at = (
                             datetime.utcnow() + timedelta(seconds=expires_in)
                         )
                     
                     await db.commit()
                     return True
-                
         except Exception as e:
             print(f"Error refreshing token: {e}")
             return False
 
 
-# app/config.py (add these to your settings)
-"""
-class Settings(BaseSettings):
-    # ... existing settings ...
-    
-    # OAuth Credentials
-    TWITTER_CLIENT_ID: str = ""
-    TWITTER_CLIENT_SECRET: str = ""
-    
-    FACEBOOK_APP_ID: str = ""
-    FACEBOOK_APP_SECRET: str = ""
-    
-    LINKEDIN_CLIENT_ID: str = ""
-    LINKEDIN_CLIENT_SECRET: str = ""
-    
-    APP_URL: str = "http://localhost:3000"
-    
-    class Config:
-        env_file = ".env"
-"""
