@@ -19,7 +19,7 @@ class OAuthService:
             "client_id": settings.TWITTER_CLIENT_ID,
             "client_secret": settings.TWITTER_CLIENT_SECRET,
             "scope": "tweet.read tweet.write users.read offline.access",
-            "redirect_uri": f"{settings.FRONTEND_URL}/auth/oauth/twitter/callback"
+            "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/twitter/callback"
         },
         "facebook": {
             "auth_url": "https://www.facebook.com/v18.0/dialog/oauth",
@@ -27,7 +27,7 @@ class OAuthService:
             "client_id": settings.FACEBOOK_APP_ID,
             "client_secret": settings.FACEBOOK_APP_SECRET,
             "scope": "pages_manage_posts,pages_read_engagement,pages_show_list",
-            "redirect_uri": f"{settings.FRONTEND_URL}/auth/oauth/facebook/callback"
+            "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/facebook/callback"
         },
         "linkedin": {
             "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
@@ -35,7 +35,7 @@ class OAuthService:
             "client_id": settings.LINKEDIN_CLIENT_ID,
             "client_secret": settings.LINKEDIN_CLIENT_SECRET,
             "scope": "w_member_social r_liteprofile",
-            "redirect_uri": f"{settings.FRONTEND_URL}/auth/oauth/linkedin/callback"
+            "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/linkedin/callback"
         }
     }
 

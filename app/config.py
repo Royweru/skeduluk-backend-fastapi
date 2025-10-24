@@ -31,16 +31,17 @@ class Settings(BaseSettings):
     TWITTER_BEARER_TOKEN: str
     TWITTER_CLIENT_ID: str  # Added this - was missing
     TWITTER_CLIENT_SECRET: str  # Added this - was missing
-    
     # Facebook
     FACEBOOK_APP_ID: str
     FACEBOOK_APP_SECRET: str
-    FRONTEND_URL: str = "http://localhost:3000"
-    BACKEND_URL: str = "http://localhost:8000"
     
     # LinkedIn
     LINKEDIN_CLIENT_ID: str
     LINKEDIN_CLIENT_SECRET: str
+    
+    # Application URLs
+    FRONTEND_URL: str = "https://skeduluk-social.vercel.app"
+    BACKEND_URL: str = "https://skeduluk-fastapi.onrender.com"
     
     # Payment (Flutterwave)
     FLUTTERWAVE_SECRET_KEY: str
