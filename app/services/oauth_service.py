@@ -174,6 +174,7 @@ class OAuthService:
                 expires_in = token_data.get("expires_in")
                 
                 if not access_token:
+                    print("No access token received")
                     return {"success": False, "error": "No access token received"}
                 
                 # Get user profile from platform
@@ -192,7 +193,7 @@ class OAuthService:
                     expires_in=expires_in,
                     platform_username=platform_username
                 )
-                
+                print ("Connection saved:", connection)
                 return {
                     "success": True,
                     "connection_id": connection.id,
