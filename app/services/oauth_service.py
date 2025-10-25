@@ -26,7 +26,7 @@ class OAuthService:
             "token_url": "https://graph.facebook.com/v18.0/oauth/access_token",
             "client_id": settings.FACEBOOK_APP_ID,
             "client_secret": settings.FACEBOOK_APP_SECRET,
-            "scope": "pages_manage_posts,pages_read_engagement,pages_show_list",
+            "scope": "pages_manage_posts,pages_read_engagement,pages_show_list,instagram_basic,instagram_content_publish",
             "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/facebook/callback"
         },
         "linkedin": {
@@ -36,6 +36,30 @@ class OAuthService:
             "client_secret": settings.LINKEDIN_CLIENT_SECRET,
             "scope": "w_member_social r_liteprofile",
             "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/linkedin/callback"
+        },
+        "instagram": {
+            "auth_url": "https://api.instagram.com/oauth/authorize",
+            "token_url": "https://api.instagram.com/oauth/access_token",
+            "client_id": settings.INSTAGRAM_CLIENT_ID,
+            "client_secret": settings.INSTAGRAM_CLIENT_SECRET,
+            "scope": "user_profile,user_media",
+            "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/instagram/callback"
+        },
+        "tiktok": {
+            "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
+            "token_url": "https://open.tiktokapis.com/v2/oauth/token/",
+            "client_id": settings.TIKTOK_CLIENT_KEY,
+            "client_secret": settings.TIKTOK_CLIENT_SECRET,
+            "scope": "user.info.basic,video.list,video.upload",
+            "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/tiktok/callback"
+        },
+        "youtube": {
+            "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+            "token_url": "https://oauth2.googleapis.com/token",
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+            "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
+            "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/youtube/callback"
         }
     }
 
@@ -72,6 +96,11 @@ class OAuthService:
         if platform == "twitter":
             params["code_challenge"] = "challenge"  # Use PKCE in production
             params["code_challenge_method"] = "plain"
+        elif platform == "youtube":
+            params["access_type"] = "offline"
+            params["prompt"] = "consent"
+        elif platform == "tiktok":
+            params["response_type"] = "code"
         
         query_string = "&".join([f"{k}={v}" for k, v in params.items()])
         auth_url = f"{config['auth_url']}?{query_string}"
@@ -105,17 +134,33 @@ class OAuthService:
         # Exchange authorization code for access token
         try:
             async with httpx.AsyncClient() as client:
-                token_response = await client.post(
-                    config["token_url"],
-                    data={
-                        "grant_type": "authorization_code",
-                        "code": code,
-                        "redirect_uri": config["redirect_uri"],
-                        "client_id": config["client_id"],
-                        "client_secret": config["client_secret"]
-                    },
-                    headers={"Content-Type": "application/x-www-form-urlencoded"}
-                )
+                # Prepare token request based on platform
+                token_params = {
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": config["redirect_uri"],
+                    "client_id": config["client_id"],
+                    "client_secret": config["client_secret"]
+                }
+                
+                # Platform-specific token request handling
+                if platform == "instagram":
+                    token_response = await client.post(
+                        config["token_url"],
+                        data=token_params
+                    )
+                elif platform == "tiktok":
+                    token_response = await client.post(
+                        config["token_url"],
+                        json=token_params,
+                        headers={"Content-Type": "application/json"}
+                    )
+                else:
+                    token_response = await client.post(
+                        config["token_url"],
+                        data=token_params,
+                        headers={"Content-Type": "application/x-www-form-urlencoded"}
+                    )
                 
                 if token_response.status_code != 200:
                     return {
@@ -190,6 +235,34 @@ class OAuthService:
                         first = data.get("localizedFirstName", "")
                         last = data.get("localizedLastName", "")
                         return f"{first} {last}".strip()
+                
+                elif platform == "instagram":
+                    response = await client.get(
+                        f"https://graph.instagram.com/me?fields=id,username&access_token={access_token}"
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        return data.get("username")
+                
+                elif platform == "tiktok":
+                    response = await client.get(
+                        "https://open.tiktokapis.com/v2/user/info/",
+                        headers={"Authorization": f"Bearer {access_token}"}
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        return data.get("data", {}).get("user", {}).get("display_name")
+                
+                elif platform == "youtube":
+                    response = await client.get(
+                        "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true",
+                        headers={"Authorization": f"Bearer {access_token}"}
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        items = data.get("items", [])
+                        if items:
+                            return items[0].get("snippet", {}).get("title")
                 
         except Exception as e:
             print(f"Error getting platform username: {e}")
@@ -293,7 +366,6 @@ class OAuthService:
                         connection.refresh_token = token_data.get("refresh_token")
                     
                     expires_in = token_data.get("expires_in")
-                    expires_in = token_data.get("expires_in")
                     if expires_in:
                         connection.token_expires_at = (
                             datetime.utcnow() + timedelta(seconds=expires_in)
@@ -304,5 +376,3 @@ class OAuthService:
         except Exception as e:
             print(f"Error refreshing token: {e}")
             return False
-
-

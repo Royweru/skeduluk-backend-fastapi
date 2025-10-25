@@ -171,6 +171,6 @@ async def oauth_callback(
     else:
         # Error - redirect with error message
         return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/dashboar/overview?error={result['error']}",
+            url=f"{settings.FRONTEND_URL}/dashboard/overview?error={result['error']}",
             status_code=302
         )

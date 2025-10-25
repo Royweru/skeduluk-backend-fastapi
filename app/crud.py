@@ -157,7 +157,8 @@ class PostCRUD:
     async def create_post(
         db: AsyncSession, 
         post: schemas.PostCreate, 
-        user_id: int
+        user_id: int,
+        platform_specific_content: Optional[Dict[str, Any]] = None  
     ) -> models.Post:
         db_post = models.Post(
             user_id=user_id,
