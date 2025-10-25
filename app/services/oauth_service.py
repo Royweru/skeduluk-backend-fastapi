@@ -29,12 +29,12 @@ class OAuthService:
             "scope": "pages_manage_posts,pages_read_engagement,pages_show_list,instagram_basic,instagram_content_publish",
             "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/facebook/callback"
         },
-        "linkedin": {
+       "linkedin": {
             "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
             "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
             "client_id": settings.LINKEDIN_CLIENT_ID,
             "client_secret": settings.LINKEDIN_CLIENT_SECRET,
-            "scope": "w_member_social r_liteprofile",
+            "scope": "openid profile email w_member_social",
             "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/linkedin/callback"
         },
         "instagram": {
