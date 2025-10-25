@@ -44,6 +44,18 @@ class Settings(BaseSettings):
     LINKEDIN_CLIENT_ID: str = ""
     LINKEDIN_CLIENT_SECRET: str = ""
     
+    # Instagram (Optional)
+    INSTAGRAM_CLIENT_ID : str = ""
+    INSTAGRAM_CLIENT_SECRET: str = ""
+    
+    #TIKTOK (Optional)
+    TIKTOK_CLIENT_ID : str = ""
+    TIKTOK_CLIENT_SECRET: str = ""
+    
+    #Youtube
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    
     # Application URLs
     FRONTEND_URL: str = "https://skeduluk-social.vercel.app"
     BACKEND_URL: str = "https://skeduluk-fastapi.onrender.com"

@@ -40,8 +40,8 @@ class OAuthService:
         "instagram": {
             "auth_url": "https://api.instagram.com/oauth/authorize",
             "token_url": "https://api.instagram.com/oauth/access_token",
-            "client_id": settings.INSTAGRAM_CLIENT_ID,
-            "client_secret": settings.INSTAGRAM_CLIENT_SECRET,
+            "client_id": settings.FACEBOOK_APP_ID,
+            "client_secret": settings.FACEBOOK_APP_SECRET,
             "scope": "user_profile,user_media",
             "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/instagram/callback"
         },
