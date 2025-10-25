@@ -64,6 +64,8 @@ class PostBase(BaseModel):
 class PostCreate(PostBase):
     enhanced_content: Optional[Dict[str, str]] = None
     image_urls: Optional[List[str]] = None
+    video_urls: Optional[List[str]] = None
+    platform_specific_content: Optional[Dict[str, str]] = None
     audio_file_url: Optional[str] = None
 
 class PostUpdate(BaseModel):

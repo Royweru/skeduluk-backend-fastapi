@@ -59,6 +59,45 @@ class UserCRUD:
         db_user.posts_used += 1
         await db.commit()
         return True
+    
+    @staticmethod
+    async def get_user_stats(db: AsyncSession, user_id: int) -> Dict[str, Any]:
+        """Get comprehensive user statistics"""
+        db_user = await UserCRUD.get_user_by_id(db, user_id)
+        if not db_user:
+            return {}
+        
+        # Get post counts by status
+        result = await db.execute(
+            select(
+                models.Post.status,
+                func.count().label("count")
+            ).where(
+                models.Post.user_id == user_id
+            ).group_by(models.Post.status)
+        )
+        rows = result.all()
+        status_counts = {row[0]: row[1] for row in rows}
+        
+        # Get connected platforms
+        result = await db.execute(
+            select(models.SocialConnection).where(
+                and_(
+                    models.SocialConnection.user_id == user_id,
+                    models.SocialConnection.is_active == True
+                )
+            )
+        )
+        connections = result.scalars().all()
+        
+        return {
+            "posts_used": db_user.posts_used,
+            "posts_limit": db_user.posts_limit,
+            "plan": db_user.plan,
+            "status_breakdown": status_counts,
+            "connected_platforms": len(connections),
+            "platforms": [conn.platform for conn in connections]
+        }
 
 class SocialConnectionCRUD:
     @staticmethod
@@ -81,6 +120,24 @@ class SocialConnectionCRUD:
         return result.scalars().all()
     
     @staticmethod
+    async def get_connection_by_platform(
+        db: AsyncSession,
+        user_id: int,
+        platform: str
+    ) -> Optional[models.SocialConnection]:
+        """Get a specific platform connection"""
+        result = await db.execute(
+            select(models.SocialConnection).where(
+                and_(
+                    models.SocialConnection.user_id == user_id,
+                    models.SocialConnection.platform == platform.upper(),
+                    models.SocialConnection.is_active == True
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+    
+    @staticmethod
     async def create_connection(
         db: AsyncSession, 
         user_id: int, 
@@ -93,10 +150,12 @@ class SocialConnectionCRUD:
             user_id=user_id,
             platform=connection.platform.upper(),
             platform_user_id=connection.platform_user_id,
-            username=connection.username,
+            platform_username=connection.username,
             access_token=access_token,
             refresh_token=refresh_token,
-            token_expires_at=token_expires_at
+            token_expires_at=token_expires_at,
+            is_active=True,
+            last_synced=datetime.utcnow()
         )
         db.add(db_connection)
         await db.commit()
@@ -121,6 +180,35 @@ class SocialConnectionCRUD:
         connection.is_active = False
         await db.commit()
         return True
+    
+    @staticmethod
+    async def update_connection_tokens(
+        db: AsyncSession,
+        connection_id: int,
+        access_token: str,
+        refresh_token: Optional[str] = None,
+        token_expires_at: Optional[datetime] = None
+    ) -> bool:
+        """Update connection OAuth tokens"""
+        result = await db.execute(
+            select(models.SocialConnection).where(
+                models.SocialConnection.id == connection_id
+            )
+        )
+        connection = result.scalar_one_or_none()
+        
+        if not connection:
+            return False
+        
+        connection.access_token = access_token
+        if refresh_token:
+            connection.refresh_token = refresh_token
+        if token_expires_at:
+            connection.token_expires_at = token_expires_at
+        connection.last_synced = datetime.utcnow()
+        
+        await db.commit()
+        return True
 
 class PostCRUD:
     @staticmethod
@@ -129,12 +217,17 @@ class PostCRUD:
         user_id: int, 
         skip: int = 0, 
         limit: int = 100,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        platform: Optional[str] = None
     ) -> List[models.Post]:
         query = select(models.Post).where(models.Post.user_id == user_id)
         
         if status:
             query = query.where(models.Post.status == status)
+        
+        if platform:
+            # Filter posts that include the specified platform
+            query = query.where(models.Post.platforms.contains([platform]))
         
         query = query.offset(skip).limit(limit).order_by(models.Post.created_at.desc())
         
@@ -160,15 +253,19 @@ class PostCRUD:
         user_id: int,
         platform_specific_content: Optional[Dict[str, Any]] = None  
     ) -> models.Post:
+        """Create a new post with support for platform-specific content and videos"""
         db_post = models.Post(
             user_id=user_id,
             original_content=post.original_content,
-            enhanced_content=post.enhanced_content,
-            image_urls=post.image_urls,
+            image_urls=post.image_urls or [],
+            video_urls=post.video_urls or [],
             audio_file_url=post.audio_file_url,
             platforms=post.platforms,
             scheduled_for=post.scheduled_for,
-            status="scheduled" if post.scheduled_for else "ready"
+            platform_specific_content=platform_specific_content,
+            status="scheduled" if post.scheduled_for else "draft",
+            ai_enhanced=False,
+            created_at=datetime.utcnow()
         )
         db.add(db_post)
         await db.commit()
@@ -194,12 +291,26 @@ class PostCRUD:
         for field, value in update_data.items():
             setattr(db_post, field, value)
         
+        db_post.updated_at = datetime.utcnow()
+        
         await db.commit()
         await db.refresh(db_post)
         return db_post
     
     @staticmethod
+    async def delete_post(db: AsyncSession, post_id: int, user_id: int) -> bool:
+        """Delete a post"""
+        db_post = await PostCRUD.get_post_by_id(db, post_id, user_id)
+        if not db_post:
+            return False
+        
+        await db.delete(db_post)
+        await db.commit()
+        return True
+    
+    @staticmethod
     async def get_scheduled_posts(db: AsyncSession, limit: int = 50) -> List[models.Post]:
+        """Get posts that are scheduled and ready to be published"""
         now = datetime.utcnow()
         result = await db.execute(
             select(models.Post).where(
@@ -216,8 +327,10 @@ class PostCRUD:
         db: AsyncSession, 
         post_id: int, 
         status: str, 
-        error_message: Optional[str] = None
+        error_messages: Optional[Dict[str, str]] = None,
+        published_urls: Optional[Dict[str, str]] = None
     ) -> bool:
+        """Update post status with optional error messages and published URLs"""
         db_post = await db.execute(
             select(models.Post).where(models.Post.id == post_id)
         )
@@ -227,11 +340,130 @@ class PostCRUD:
             return False
         
         post.status = status
-        post.error_message = error_message
+        if error_messages:
+            post.error_messages = error_messages
+        if published_urls:
+            post.published_urls = published_urls
+        if status == "posted":
+            post.published_at = datetime.utcnow()
         post.updated_at = datetime.utcnow()
         
         await db.commit()
         return True
+    
+    @staticmethod
+    async def get_posts_by_date_range(
+        db: AsyncSession,
+        user_id: int,
+        start_date: datetime,
+        end_date: datetime
+    ) -> List[models.Post]:
+        """Get posts within a date range (for calendar view)"""
+        result = await db.execute(
+            select(models.Post).where(
+                and_(
+                    models.Post.user_id == user_id,
+                    or_(
+                        and_(
+                            models.Post.scheduled_for >= start_date,
+                            models.Post.scheduled_for <= end_date
+                        ),
+                        and_(
+                            models.Post.published_at >= start_date,
+                            models.Post.published_at <= end_date
+                        )
+                    )
+                )
+            ).order_by(models.Post.scheduled_for.desc())
+        )
+        return result.scalars().all()
+    
+    @staticmethod
+    async def duplicate_post(
+        db: AsyncSession,
+        post_id: int,
+        user_id: int
+    ) -> Optional[models.Post]:
+        """Create a duplicate of an existing post"""
+        original = await PostCRUD.get_post_by_id(db, post_id, user_id)
+        if not original:
+            return None
+        
+        duplicate = models.Post(
+            user_id=user_id,
+            original_content=original.original_content,
+            platforms=original.platforms,
+            image_urls=original.image_urls,
+            video_urls=original.video_urls,
+            audio_file_url=original.audio_file_url,
+            platform_specific_content=original.platform_specific_content,
+            ai_enhanced=original.ai_enhanced,
+            ai_suggestions=original.ai_suggestions,
+            status="draft",
+            created_at=datetime.utcnow()
+        )
+        
+        db.add(duplicate)
+        await db.commit()
+        await db.refresh(duplicate)
+        
+        return duplicate
+    
+    @staticmethod
+    async def get_post_analytics(
+        db: AsyncSession,
+        user_id: int,
+        days: int = 30
+    ) -> Dict[str, Any]:
+        """Get post analytics for the specified period"""
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days)
+        
+        # Get posts in date range
+        result = await db.execute(
+            select(models.Post).where(
+                and_(
+                    models.Post.user_id == user_id,
+                    models.Post.created_at >= start_date
+                )
+            )
+        )
+        posts = result.scalars().all()
+        
+        # Calculate statistics
+        total_posts = len(posts)
+        status_distribution = {}
+        platform_distribution = {}
+        
+        for post in posts:
+            # Status counts
+            status_distribution[post.status] = status_distribution.get(post.status, 0) + 1
+            
+            # Platform counts
+            for platform in post.platforms:
+                platform_distribution[platform] = platform_distribution.get(platform, 0) + 1
+        
+        # Media statistics
+        posts_with_images = sum(1 for p in posts if p.image_urls)
+        posts_with_videos = sum(1 for p in posts if p.video_urls)
+        total_images = sum(len(p.image_urls or []) for p in posts)
+        total_videos = sum(len(p.video_urls or []) for p in posts)
+        
+        return {
+            "period_days": days,
+            "total_posts": total_posts,
+            "status_distribution": status_distribution,
+            "platform_distribution": platform_distribution,
+            "media_stats": {
+                "posts_with_images": posts_with_images,
+                "posts_with_videos": posts_with_videos,
+                "total_images": total_images,
+                "total_videos": total_videos
+            },
+            "ai_enhanced_count": sum(1 for p in posts if p.ai_enhanced),
+            "scheduled_count": sum(1 for p in posts if p.status == "scheduled"),
+            "published_count": sum(1 for p in posts if p.status == "posted")
+        }
 
 class PostResultCRUD:
     @staticmethod
@@ -241,13 +473,16 @@ class PostResultCRUD:
         platform: str,
         status: str,
         platform_post_id: Optional[str] = None,
+        platform_post_url: Optional[str] = None,
         error_message: Optional[str] = None,
         content_used: Optional[str] = None
     ) -> models.PostResult:
+        """Create a post result entry for tracking platform-specific outcomes"""
         db_result = models.PostResult(
             post_id=post_id,
             platform=platform,
             platform_post_id=platform_post_id,
+            platform_post_url=platform_post_url,
             status=status,
             error_message=error_message,
             posted_at=datetime.utcnow() if status == "posted" else None,
@@ -264,6 +499,23 @@ class PostResultCRUD:
             select(models.PostResult).where(models.PostResult.post_id == post_id)
         )
         return result.scalars().all()
+    
+    @staticmethod
+    async def get_result_by_platform(
+        db: AsyncSession,
+        post_id: int,
+        platform: str
+    ) -> Optional[models.PostResult]:
+        """Get result for a specific platform"""
+        result = await db.execute(
+            select(models.PostResult).where(
+                and_(
+                    models.PostResult.post_id == post_id,
+                    models.PostResult.platform == platform
+                )
+            )
+        )
+        return result.scalar_one_or_none()
 
 class SubscriptionCRUD:
     @staticmethod
@@ -287,14 +539,14 @@ class SubscriptionCRUD:
     ) -> models.Subscription:
         # Calculate end date based on plan
         now = datetime.utcnow()
-        if subscription.plan == "basic":
-            ends_at = now + timedelta(days=30)
-        elif subscription.plan == "pro":
-            ends_at = now + timedelta(days=30)
-        elif subscription.plan == "enterprise":
-            ends_at = now + timedelta(days=365)
-        else:
-            ends_at = now + timedelta(days=7)  # Default for trial
+        plan_durations = {
+            "basic": 30,
+            "pro": 30,
+            "enterprise": 365,
+            "trial": 7
+        }
+        days = plan_durations.get(subscription.plan, 30)
+        ends_at = now + timedelta(days=days)
         
         db_subscription = models.Subscription(
             user_id=user_id,
@@ -304,7 +556,8 @@ class SubscriptionCRUD:
             payment_method=subscription.payment_method,
             payment_reference=subscription.payment_reference,
             starts_at=now,
-            ends_at=ends_at
+            ends_at=ends_at,
+            status="active"
         )
         db.add(db_subscription)
         await db.commit()
@@ -314,12 +567,13 @@ class SubscriptionCRUD:
         user = await UserCRUD.get_user_by_id(db, user_id)
         if user:
             user.plan = subscription.plan
-            if subscription.plan == "basic":
-                user.posts_limit = 50
-            elif subscription.plan == "pro":
-                user.posts_limit = 200
-            elif subscription.plan == "enterprise":
-                user.posts_limit = 1000
+            plan_limits = {
+                "free": 10,
+                "basic": 50,
+                "pro": 200,
+                "enterprise": 1000
+            }
+            user.posts_limit = plan_limits.get(subscription.plan, 10)
             await db.commit()
         
         return db_subscription
@@ -362,9 +616,34 @@ class TemplateCRUD:
             name=template.name,
             content=template.content,
             platforms=template.platforms,
-            is_public=template.is_public
+            is_public=template.is_public,
+            created_at=datetime.utcnow()
         )
         db.add(db_template)
         await db.commit()
         await db.refresh(db_template)
         return db_template
+    
+    @staticmethod
+    async def delete_template(
+        db: AsyncSession,
+        template_id: int,
+        user_id: int
+    ) -> bool:
+        """Delete a template"""
+        result = await db.execute(
+            select(models.PostTemplate).where(
+                and_(
+                    models.PostTemplate.id == template_id,
+                    models.PostTemplate.user_id == user_id
+                )
+            )
+        )
+        template = result.scalar_one_or_none()
+        
+        if not template:
+            return False
+        
+        await db.delete(template)
+        await db.commit()
+        return True

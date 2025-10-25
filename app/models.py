@@ -1,5 +1,5 @@
 # app/models.py
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, JSON
 from datetime import datetime, timedelta
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -66,6 +66,8 @@ class Post(Base):
     original_content = Column(Text, nullable=False)
     enhanced_content = Column(Text, nullable=True)
     image_urls = Column(Text, nullable=True)
+    video_urls = Column(Text, nullable=True)
+    platform_specific_content = Column(JSON, nullable=True)
     audio_file_url = Column(String, nullable=True)
     platforms = Column(Text, nullable=False)
     status = Column(String, default="processing")
