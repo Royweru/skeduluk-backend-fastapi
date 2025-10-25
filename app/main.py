@@ -7,19 +7,21 @@ from .config import settings
 
 app = FastAPI(title=settings.APP_NAME)
 
-# Configure CORS
+# Configure CORS - CRITICAL FIX
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://skeduluk-social.vercel.app"
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3001",
+        "https://skeduluk-social.vercel.app", 
+        "https://*.vercel.app", 
     ],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods (GET, POST, PUT, DELETE, etc.)
-    allow_headers=["*"], 
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],  # Add this line
 )
 
 # Include routers
@@ -37,7 +39,6 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
-# --- CHANGE 4: Add block to run with `python -m app.main` ---
 if __name__ == "__main__":
     print("Starting application...")
     print("Listening on http://localhost:8000")
