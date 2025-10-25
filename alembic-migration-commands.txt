@@ -1,0 +1,29 @@
+# Show current migration version
+alembic current
+
+# Show migration history
+alembic history
+
+# Generate new migration (auto-detect changes)
+alembic revision --autogenerate -m "description"
+
+# Create empty migration (manual)
+alembic revision -m "description"
+
+# Apply all migrations
+alembic upgrade head
+
+# Apply specific migration
+alembic upgrade abc123
+
+# Rollback one migration
+alembic downgrade -1
+
+# Rollback to specific version
+alembic downgrade abc123
+
+# Rollback all migrations
+alembic downgrade base
+
+# Show SQL without executing
+alembic upgrade head --sql
