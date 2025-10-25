@@ -48,7 +48,7 @@ class OAuthService:
         "tiktok": {
             "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
             "token_url": "https://open.tiktokapis.com/v2/oauth/token/",
-            "client_id": settings.TIKTOK_CLIENT_KEY,
+            "client_id": settings.TIKTOK_CLIENT_ID,
             "client_secret": settings.TIKTOK_CLIENT_SECRET,
             "scope": "user.info.basic,video.list,video.upload",
             "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/tiktok/callback"
