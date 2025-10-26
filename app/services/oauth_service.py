@@ -29,7 +29,7 @@ class OAuthService:
             "scope": "pages_manage_posts,pages_read_engagement,pages_show_list,instagram_basic,instagram_content_publish",
             "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/facebook/callback"
         },
-       "linkedin": {
+        "linkedin": {
             "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
             "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
             "client_id": settings.LINKEDIN_CLIENT_ID,
@@ -163,6 +163,7 @@ class OAuthService:
                     )
                 
                 if token_response.status_code != 200:
+                    print(f"Token exchange failed: {token_response.status_code} - {token_response.text}")
                     return {
                         "success": False, 
                         "error": f"Token exchange failed: {token_response.text}"
@@ -177,11 +178,19 @@ class OAuthService:
                     print("No access token received")
                     return {"success": False, "error": "No access token received"}
                 
+                print(f"Access token received for {platform}")
+                
                 # Get user profile from platform
-                platform_username = await cls._get_platform_username(
+                user_info = await cls._get_platform_user_info(
                     platform, 
                     access_token
                 )
+                
+                if not user_info:
+                    print(f"Failed to get user info from {platform}")
+                    return {"success": False, "error": f"Failed to get user profile from {platform}"}
+                
+                print(f"User info retrieved: {user_info}")
                 
                 # Save connection to database
                 connection = await cls._save_connection(
@@ -191,22 +200,32 @@ class OAuthService:
                     access_token=access_token,
                     refresh_token=refresh_token,
                     expires_in=expires_in,
-                    platform_username=platform_username
+                    platform_user_id=user_info.get("user_id"),
+                    platform_username=user_info.get("username"),
+                    platform_name=user_info.get("name")
                 )
-                print ("Connection saved:", connection)
+                
+                print(f"Connection saved: {connection.id}")
+                
                 return {
                     "success": True,
                     "connection_id": connection.id,
                     "platform": platform,
-                    "username": platform_username
+                    "username": user_info.get("username") or user_info.get("name")
                 }
                 
         except Exception as e:
+            print(f"OAuth callback error: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {"success": False, "error": str(e)}
 
     @classmethod
-    async def _get_platform_username(cls, platform: str, access_token: str) -> Optional[str]:
-        """Get username from platform API"""
+    async def _get_platform_user_info(cls, platform: str, access_token: str) -> Optional[Dict]:
+        """
+        Get user info from platform API
+        Returns: {"user_id": str, "username": str, "name": str}
+        """
         try:
             async with httpx.AsyncClient() as client:
                 if platform == "twitter":
@@ -216,26 +235,40 @@ class OAuthService:
                     )
                     if response.status_code == 200:
                         data = response.json()
-                        return data.get("data", {}).get("username")
+                        user_data = data.get("data", {})
+                        return {
+                            "user_id": user_data.get("id"),
+                            "username": user_data.get("username"),
+                            "name": user_data.get("name")
+                        }
                 
                 elif platform == "facebook":
                     response = await client.get(
-                        f"https://graph.facebook.com/me?access_token={access_token}"
+                        f"https://graph.facebook.com/me?fields=id,name&access_token={access_token}"
                     )
                     if response.status_code == 200:
                         data = response.json()
-                        return data.get("name")
+                        return {
+                            "user_id": data.get("id"),
+                            "username": data.get("id"),  # Facebook doesn't have username
+                            "name": data.get("name")
+                        }
                 
                 elif platform == "linkedin":
+                    # Get user ID first
                     response = await client.get(
-                        "https://api.linkedin.com/v2/me",
+                        "https://api.linkedin.com/v2/userinfo",
                         headers={"Authorization": f"Bearer {access_token}"}
                     )
                     if response.status_code == 200:
                         data = response.json()
-                        first = data.get("localizedFirstName", "")
-                        last = data.get("localizedLastName", "")
-                        return f"{first} {last}".strip()
+                        return {
+                            "user_id": data.get("sub"),  # LinkedIn uses 'sub' for user ID
+                            "username": data.get("email", "").split("@")[0],  # Use email prefix as username
+                            "name": data.get("name") or f"{data.get('given_name', '')} {data.get('family_name', '')}".strip()
+                        }
+                    else:
+                        print(f"LinkedIn API error: {response.status_code} - {response.text}")
                 
                 elif platform == "instagram":
                     response = await client.get(
@@ -243,16 +276,25 @@ class OAuthService:
                     )
                     if response.status_code == 200:
                         data = response.json()
-                        return data.get("username")
+                        return {
+                            "user_id": data.get("id"),
+                            "username": data.get("username"),
+                            "name": data.get("username")
+                        }
                 
                 elif platform == "tiktok":
                     response = await client.get(
-                        "https://open.tiktokapis.com/v2/user/info/",
+                        "https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url,display_name",
                         headers={"Authorization": f"Bearer {access_token}"}
                     )
                     if response.status_code == 200:
                         data = response.json()
-                        return data.get("data", {}).get("user", {}).get("display_name")
+                        user_data = data.get("data", {}).get("user", {})
+                        return {
+                            "user_id": user_data.get("open_id"),
+                            "username": user_data.get("display_name"),
+                            "name": user_data.get("display_name")
+                        }
                 
                 elif platform == "youtube":
                     response = await client.get(
@@ -263,11 +305,20 @@ class OAuthService:
                         data = response.json()
                         items = data.get("items", [])
                         if items:
-                            return items[0].get("snippet", {}).get("title")
+                            channel = items[0]
+                            return {
+                                "user_id": channel.get("id"),
+                                "username": channel.get("snippet", {}).get("title"),
+                                "name": channel.get("snippet", {}).get("title")
+                            }
                 
         except Exception as e:
-            print(f"Error getting platform username: {e}")
+            print(f"Error getting platform user info: {e}")
+            import traceback
+            traceback.print_exc()
             return None
+        
+        return None
 
     @classmethod
     async def _save_connection(
@@ -278,9 +329,18 @@ class OAuthService:
         access_token: str,
         refresh_token: Optional[str],
         expires_in: Optional[int],
-        platform_username: Optional[str]
+        platform_user_id: Optional[str],
+        platform_username: Optional[str],
+        platform_name: Optional[str] = None
     ) -> models.SocialConnection:
         """Save or update social connection"""
+        
+        # Ensure we have required fields
+        if not platform_user_id:
+            platform_user_id = f"temp_{platform}_{user_id}"  # Fallback
+        
+        if not platform_username:
+            platform_username = platform_user_id
         
         # Check if connection already exists
         result = await db.execute(
@@ -293,29 +353,36 @@ class OAuthService:
         
         if connection:
             # Update existing connection
+            connection.platform_user_id = platform_user_id
+            connection.platform_username = platform_username
+            connection.username = platform_name or platform_username  # For backward compatibility
             connection.access_token = access_token
             connection.refresh_token = refresh_token
             connection.token_expires_at = (
                 datetime.utcnow() + timedelta(seconds=expires_in)
                 if expires_in else None
             )
-            connection.platform_username = platform_username
             connection.is_active = True
             connection.last_synced = datetime.utcnow()
+            connection.updated_at = datetime.utcnow()
         else:
             # Create new connection
             connection = models.SocialConnection(
                 user_id=user_id,
                 platform=platform.upper(),
+                platform_user_id=platform_user_id,
+                platform_username=platform_username,
+                username=platform_name or platform_username,  # For backward compatibility
                 access_token=access_token,
                 refresh_token=refresh_token,
                 token_expires_at=(
                     datetime.utcnow() + timedelta(seconds=expires_in)
                     if expires_in else None
                 ),
-                platform_username=platform_username,
                 is_active=True,
-                last_synced=datetime.utcnow()
+                last_synced=datetime.utcnow(),
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
             )
             db.add(connection)
         
@@ -377,3 +444,5 @@ class OAuthService:
         except Exception as e:
             print(f"Error refreshing token: {e}")
             return False
+        
+        return False
