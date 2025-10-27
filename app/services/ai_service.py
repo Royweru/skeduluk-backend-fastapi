@@ -37,7 +37,7 @@ class AIService:
         
         if gemini_key:
             genai.configure(api_key=gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-pro')
+            self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
         
         if grok_key:
             # Grok uses OpenAI-compatible API

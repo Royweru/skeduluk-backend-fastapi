@@ -201,7 +201,6 @@ class OAuthService:
                     refresh_token=refresh_token,
                     expires_in=expires_in,
                     platform_user_id=user_info.get("user_id"),
-                    platform_username=user_info.get("username"),
                     platform_name=user_info.get("name")
                 )
                 
@@ -330,7 +329,6 @@ class OAuthService:
         refresh_token: Optional[str],
         expires_in: Optional[int],
         platform_user_id: Optional[str],
-        platform_username: Optional[str],
         platform_name: Optional[str] = None
     ) -> models.SocialConnection:
         """Save or update social connection"""
@@ -354,7 +352,6 @@ class OAuthService:
         if connection:
             # Update existing connection
             connection.platform_user_id = platform_user_id
-            connection.platform_username = platform_username
             connection.username = platform_name or platform_username  # For backward compatibility
             connection.access_token = access_token
             connection.refresh_token = refresh_token
