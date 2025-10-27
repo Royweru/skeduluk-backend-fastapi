@@ -115,6 +115,7 @@ async def enhance_content(
     enhancements = []
     
     for platform in request.platforms:
+        print(f"Enhancing content for platform: {platform}")
         enhanced_content = await ai_service.enhance_content(
             content=request.content,
             platform=platform,
