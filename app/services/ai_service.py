@@ -3,8 +3,10 @@ import os
 from typing import Dict, List, Optional
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
-import google.generativeai as genai
-import httpx
+from google import genai
+from google.genai import types
+from groq import AsyncGroq
+import asyncio
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,38 +15,54 @@ load_dotenv()
 class AIService:
     """
     AI Service for content enhancement using multiple providers
-    Supports: OpenAI (GPT-4), Anthropic (Claude), Google (Gemini), and X.AI (Grok)
+    Supports: Groq (fast inference), Google Gemini 2.5, OpenAI GPT-4, Anthropic Claude, X.AI Grok
     """
     
     def __init__(self):
         self.openai_client = None
         self.anthropic_client = None
-        self.gemini_model = None
+        self.gemini_client = None
+        self.groq_client = None
         self.grok_client = None
-        self.provider = os.getenv("AI_PROVIDER", "openai").lower()
+        self.provider = os.getenv("AI_PROVIDER", "groq").lower()
         
         # Initialize clients based on available API keys
+        groq_key = os.getenv("GROQ_API_KEY")
+        gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         openai_key = os.getenv("OPENAI_API_KEY")
         anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        gemini_key = os.getenv("GOOGLE_API_KEY")
-        grok_key = os.getenv("XAI_API_KEY")  # X.AI API key for Grok
+        grok_key = os.getenv("XAI_API_KEY")
         
+        # Initialize Groq (OpenAI-compatible, very fast)
+        if groq_key:
+            self.groq_client = AsyncGroq(api_key=groq_key)
+            print("✓ Groq client initialized")
+        
+        # Initialize Google Gemini 2.5 (NEW SDK)
+        if gemini_key:
+            try:
+                self.gemini_client = genai.Client(api_key=gemini_key)
+                print("✓ Google Gemini client initialized")
+            except Exception as e:
+                print(f"Failed to initialize Gemini: {e}")
+        
+        # Initialize OpenAI
         if openai_key:
             self.openai_client = AsyncOpenAI(api_key=openai_key)
+            print("✓ OpenAI client initialized")
         
+        # Initialize Anthropic Claude
         if anthropic_key:
             self.anthropic_client = AsyncAnthropic(api_key=anthropic_key)
+            print("✓ Anthropic client initialized")
         
-        if gemini_key:
-            genai.configure(api_key=gemini_key)
-            self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
-        
+        # Initialize Grok (X.AI)
         if grok_key:
-            # Grok uses OpenAI-compatible API
             self.grok_client = AsyncOpenAI(
                 api_key=grok_key,
                 base_url="https://api.x.ai/v1"
             )
+            print("✓ Grok client initialized")
         
         # Platform character limits
         self.platform_limits = {
@@ -78,7 +96,7 @@ class AIService:
             content: Original content to enhance
             platform: Target platform (TWITTER, LINKEDIN, FACEBOOK, INSTAGRAM)
             tone: Desired tone (engaging, professional, casual, humorous, inspirational)
-            image_count: Number of images to suggest (for Instagram/Facebook)
+            image_count: Number of images to suggest
             include_hashtags: Whether to include relevant hashtags
             include_emojis: Whether to include emojis
         
@@ -106,14 +124,19 @@ class AIService:
         
         for provider_name in providers:
             try:
-                if provider_name == "grok" and self.grok_client:
-                    return await self._enhance_with_grok(prompt, char_limit)
-                elif provider_name == "gemini" and self.gemini_model:
+                print(f"Trying provider: {provider_name}")
+                
+                if provider_name == "groq" and self.groq_client:
+                    return await self._enhance_with_groq(prompt, char_limit)
+                elif provider_name == "gemini" and self.gemini_client:
                     return await self._enhance_with_gemini(prompt, char_limit)
                 elif provider_name == "openai" and self.openai_client:
                     return await self._enhance_with_openai(prompt, char_limit)
                 elif provider_name == "anthropic" and self.anthropic_client:
                     return await self._enhance_with_anthropic(prompt, char_limit)
+                elif provider_name == "grok" and self.grok_client:
+                    return await self._enhance_with_grok(prompt, char_limit)
+                    
             except Exception as e:
                 print(f"Error with {provider_name}: {e}, trying next provider...")
                 continue
@@ -127,24 +150,28 @@ class AIService:
         available = []
         
         # Add configured provider first
-        if self.provider == "grok" and self.grok_client:
-            available.append("grok")
-        elif self.provider == "gemini" and self.gemini_model:
+        if self.provider == "groq" and self.groq_client:
+            available.append("groq")
+        elif self.provider == "gemini" and self.gemini_client:
             available.append("gemini")
         elif self.provider == "openai" and self.openai_client:
             available.append("openai")
         elif self.provider == "anthropic" and self.anthropic_client:
             available.append("anthropic")
+        elif self.provider == "grok" and self.grok_client:
+            available.append("grok")
         
         # Add other available providers as fallbacks
-        if "grok" not in available and self.grok_client:
-            available.append("grok")
-        if "gemini" not in available and self.gemini_model:
+        if "groq" not in available and self.groq_client:
+            available.append("groq")
+        if "gemini" not in available and self.gemini_client:
             available.append("gemini")
         if "openai" not in available and self.openai_client:
             available.append("openai")
         if "anthropic" not in available and self.anthropic_client:
             available.append("anthropic")
+        if "grok" not in available and self.grok_client:
+            available.append("grok")
         
         return available
     
@@ -164,8 +191,7 @@ class AIService:
         hashtag_instruction = "Include 3-5 relevant hashtags." if include_hashtags else "Do not include hashtags."
         emoji_instruction = "Include relevant emojis to enhance engagement." if include_emojis else "Do not include emojis."
         
-        prompt = f"""You are a professional social media content writer. Enhance the 
-        following content for {platform}.
+        prompt = f"""You are a professional social media content writer. Enhance the following content for {platform}.
 
 Original Content:
 {content}
@@ -190,9 +216,47 @@ Additional Guidelines:
 Return ONLY the enhanced content, nothing else. No explanations or meta-commentary."""
 
         if image_count > 0:
-            prompt += f"\n- Suggest {image_count} image ideas in a separate line starting with 'IMAGE IDEAS:'"
+            prompt += f"\n- Optionally suggest {image_count} image ideas"
         
         return prompt
+    
+    async def _enhance_with_groq(self, prompt: str, char_limit: int) -> str:
+        """Enhance content using Groq (fastest inference)"""
+        response = await self.groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",  # Fast and capable
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert social media content creator. Create engaging, authentic content optimized for each platform."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.7,
+            max_tokens=min(char_limit + 300, 4000)
+        )
+        
+        return response.choices[0].message.content.strip()
+    
+    async def _enhance_with_gemini(self, prompt: str, char_limit: int) -> str:
+        """Enhance content using Google Gemini 2.5 (NEW SDK)"""
+        # Gemini API is synchronous, run in thread pool
+        def generate():
+            response = self.gemini_client.models.generate_content(
+                model='gemini-2.5-flash',  # Fast and efficient
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.7,
+                    max_output_tokens=min(char_limit + 300, 8000),
+                    system_instruction="You are an expert social media content creator. Create engaging, authentic content optimized for each platform."
+                )
+            )
+            return response.text.strip()
+        
+        result = await asyncio.to_thread(generate)
+        return result
     
     async def _enhance_with_openai(self, prompt: str, char_limit: int) -> str:
         """Enhance content using OpenAI GPT-4"""
@@ -209,7 +273,7 @@ Return ONLY the enhanced content, nothing else. No explanations or meta-commenta
                 }
             ],
             temperature=0.7,
-            max_tokens=min(char_limit + 200, 4000)
+            max_tokens=min(char_limit + 300, 4000)
         )
         
         return response.choices[0].message.content.strip()
@@ -218,7 +282,7 @@ Return ONLY the enhanced content, nothing else. No explanations or meta-commenta
         """Enhance content using Anthropic Claude"""
         message = await self.anthropic_client.messages.create(
             model="claude-3-5-sonnet-20241022",
-            max_tokens=min(char_limit + 200, 4000),
+            max_tokens=min(char_limit + 300, 4000),
             temperature=0.7,
             messages=[
                 {
@@ -230,24 +294,10 @@ Return ONLY the enhanced content, nothing else. No explanations or meta-commenta
         
         return message.content[0].text.strip()
     
-    async def _enhance_with_gemini(self, prompt: str, char_limit: int) -> str:
-        """Enhance content using Google Gemini"""
-        # Gemini doesn't have native async, so we'll use it synchronously
-        # In production, consider using asyncio.to_thread
-        import asyncio
-        
-        def generate():
-            response = self.gemini_model.generate_content(prompt)
-            return response.text.strip()
-        
-        # Run in thread pool to avoid blocking
-        result = await asyncio.to_thread(generate)
-        return result
-    
     async def _enhance_with_grok(self, prompt: str, char_limit: int) -> str:
-        """Enhance content using X.AI Grok (OpenAI-compatible API)"""
+        """Enhance content using X.AI Grok"""
         response = await self.grok_client.chat.completions.create(
-            model="grok-beta",  # or "grok-2-latest" depending on availability
+            model="grok-beta",
             messages=[
                 {
                     "role": "system",
@@ -258,15 +308,14 @@ Return ONLY the enhanced content, nothing else. No explanations or meta-commenta
                     "content": prompt
                 }
             ],
-            temperature=0.8,  # Grok is more fun with higher temperature
-            max_tokens=min(char_limit + 200, 4000)
+            temperature=0.8,
+            max_tokens=min(char_limit + 300, 4000)
         )
         
         return response.choices[0].message.content.strip()
     
     async def _basic_enhancement(self, content: str, platform: str, char_limit: int) -> str:
         """Basic enhancement when no AI provider is available"""
-        # Simple rule-based enhancement
         enhanced = content.strip()
         
         # Truncate if too long
@@ -275,11 +324,9 @@ Return ONLY the enhanced content, nothing else. No explanations or meta-commenta
         
         # Add platform-specific touches
         if platform == "TWITTER":
-            # Add a simple hashtag if none exists
             if "#" not in enhanced:
                 enhanced += " #SocialMedia"
         elif platform == "LINKEDIN":
-            # Add professional CTA
             if "?" not in enhanced:
                 enhanced += "\n\nWhat are your thoughts?"
         
@@ -295,7 +342,27 @@ Hashtags:"""
         
         try:
             # Try with primary provider
-            if self.openai_client:
+            if self.groq_client:
+                response = await self.groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.5,
+                    max_tokens=100
+                )
+                hashtags_text = response.choices[0].message.content.strip()
+            elif self.gemini_client:
+                def generate():
+                    response = self.gemini_client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.5,
+                            max_output_tokens=100
+                        )
+                    )
+                    return response.text.strip()
+                hashtags_text = await asyncio.to_thread(generate)
+            elif self.openai_client:
                 response = await self.openai_client.chat.completions.create(
                     model="gpt-4-turbo-preview",
                     messages=[{"role": "user", "content": prompt}],
@@ -310,14 +377,6 @@ Hashtags:"""
                     messages=[{"role": "user", "content": prompt}]
                 )
                 hashtags_text = message.content[0].text.strip()
-            elif self.grok_client:
-                response = await self.grok_client.chat.completions.create(
-                    model="grok-beta",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.5,
-                    max_tokens=100
-                )
-                hashtags_text = response.choices[0].message.content.strip()
             else:
                 return ["#SocialMedia", "#Content", "#Digital"]
             
@@ -331,7 +390,6 @@ Hashtags:"""
     
     async def suggest_post_time(self, platform: str, timezone: str = "UTC") -> Dict[str, str]:
         """Suggest optimal posting time for a platform"""
-        # Best times based on research (simplified)
         best_times = {
             "TWITTER": {"day": "Wednesday", "time": "09:00 AM - 12:00 PM"},
             "LINKEDIN": {"day": "Tuesday-Thursday", "time": "08:00 AM - 10:00 AM"},
@@ -344,9 +402,10 @@ Hashtags:"""
     def get_provider_info(self) -> Dict[str, bool]:
         """Get information about available AI providers"""
         return {
+            "groq": self.groq_client is not None,
+            "gemini": self.gemini_client is not None,
             "openai": self.openai_client is not None,
             "anthropic": self.anthropic_client is not None,
-            "gemini": self.gemini_model is not None,
             "grok": self.grok_client is not None,
             "configured_provider": self.provider
         }

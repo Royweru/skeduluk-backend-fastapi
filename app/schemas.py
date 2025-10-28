@@ -1,5 +1,5 @@
 # app/schemas.py
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator,Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -147,17 +147,61 @@ class TemplateResponse(TemplateBase):
 
 # AI Enhancement schemas
 class ContentEnhancementRequest(BaseModel):
-    content: str
-    platforms: List[str]
-    image_count: int = 0
-    tone: str = "engaging"
+    content: str = Field(..., min_length=1, max_length=10000, description="Original content to enhance")
+    platforms: List[str] = Field(..., min_items=1, description="List of target platforms")
+    image_count: int = Field(default=0, ge=0, le=10, description="Number of images attached")
+    tone: str = Field(default="engaging", description="Desired tone for the content")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "content": "Just launched our new product!",
+                "platforms": ["TWITTER", "LINKEDIN"],
+                "image_count": 1,
+                "tone": "professional"
+            }
+        }
 
-class ContentEnhancementResponse(BaseModel):
+
+class PlatformEnhancement(BaseModel):
     platform: str
     enhanced_content: str
-    original_length: int
-    enhanced_length: int
 
+
+class ContentEnhancementResponse(BaseModel):
+    enhancements: List[PlatformEnhancement]
+
+
+class HashtagsRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=5000)
+    count: int = Field(default=5, ge=1, le=20, description="Number of hashtags to generate")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "content": "Excited to share our latest AI-powered features!",
+                "count": 5
+            }
+        }
+
+
+class HashtagsResponse(BaseModel):
+    hashtags: List[str]
+
+
+class AIProvidersResponse(BaseModel):
+    groq: bool
+    gemini: bool
+    openai: bool
+    anthropic: bool
+    grok: bool
+    configured_provider: str
+
+
+class PostTimeResponse(BaseModel):
+    platform: str
+    day: str
+    time: str
 # Payment schemas
 class PaymentInitiateRequest(BaseModel):
     plan: str

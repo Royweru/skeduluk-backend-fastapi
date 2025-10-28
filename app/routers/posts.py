@@ -1,12 +1,11 @@
 # app/routers/posts.py
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form,status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from datetime import datetime
-from ..services import ai_service
 from .. import auth, schemas, models
 from ..database import get_async_db
-from ..services.post_service import PostService
+from app.services.post_service import ai_service,PostService
 from ..crud import PostCRUD
 router = APIRouter(prefix="/posts", tags=["posts"])
 
@@ -106,28 +105,154 @@ async def publish_post(
     
     return {"message": "Post is being published"}
 
-@router.post("/enhance")
+@router.post("/enhance", response_model=schemas.ContentEnhancementResponse)
 async def enhance_content(
     request: schemas.ContentEnhancementRequest,
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    """Enhance content for different platforms using AI"""
-    enhancements = []
+    """
+    Enhance content for different platforms using AI
     
-    for platform in request.platforms:
-        print(f"Enhancing content for platform: {platform}")
-        enhanced_content = await ai_service.enhance_content(
-            content=request.content,
-            platform=platform,
-            image_count=request.image_count,
-            tone=request.tone
+    - **content**: Original content to enhance
+    - **platforms**: List of target platforms (TWITTER, LINKEDIN, FACEBOOK, INSTAGRAM)
+    - **tone**: Desired tone (engaging, professional, casual, humorous, inspirational)
+    - **image_count**: Number of images attached (for context)
+    """
+    try:
+        # Validate platforms
+        valid_platforms = ["TWITTER", "LINKEDIN", "FACEBOOK", "INSTAGRAM"]
+        for platform in request.platforms:
+            if platform.upper() not in valid_platforms:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid platform: {platform}. Must be one of: {', '.join(valid_platforms)}"
+                )
+        
+        # Check if any AI provider is available
+        provider_info = ai_service.get_provider_info()
+        has_provider = any([
+            provider_info["groq"],
+            provider_info["gemini"],
+            provider_info["openai"],
+            provider_info["anthropic"],
+            provider_info["grok"]
+        ])
+        
+        if not has_provider:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No AI provider configured. Please set up GROQ_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, or XAI_API_KEY"
+            )
+        
+        # Enhance content for each platform
+        enhancements = []
+        
+        for platform in request.platforms:
+            print(f"Enhancing content for platform: {platform}")
+            
+            try:
+                enhanced_content = await ai_service.enhance_content(
+                    content=request.content,
+                    platform=platform.upper(),
+                    tone=request.tone,
+                    image_count=request.image_count,
+                    include_hashtags=True,
+                    include_emojis=platform.upper() == "INSTAGRAM"  # Auto-enable emojis for Instagram
+                )
+                
+                enhancements.append({
+                    "platform": platform.upper(),
+                    "enhanced_content": enhanced_content
+                })
+                
+            except Exception as e:
+                print(f"Error enhancing for {platform}: {str(e)}")
+                # Instead of failing completely, use basic enhancement
+                basic_enhanced = await ai_service._basic_enhancement(
+                    request.content,
+                    platform.upper(),
+                    ai_service.platform_limits.get(platform.upper(), 3000)
+                )
+                enhancements.append({
+                    "platform": platform.upper(),
+                    "enhanced_content": basic_enhanced
+                })
+        
+        return {"enhancements": enhancements}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Content enhancement error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to enhance content: {str(e)}"
         )
-        enhancements.append({
-            "platform": platform,
-            "enhanced_content": enhanced_content
-        })
+
+
+@router.post("/generate-hashtags", response_model=schemas.HashtagsResponse)
+async def generate_hashtags(
+    request: schemas.HashtagsRequest,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """
+    Generate relevant hashtags for content
     
-    return {"enhancements": enhancements}
+    - **content**: Content to generate hashtags for
+    - **count**: Number of hashtags to generate (default: 5)
+    """
+    try:
+        hashtags = await ai_service.generate_hashtags(
+            content=request.content,
+            count=request.count
+        )
+        
+        return {"hashtags": hashtags}
+    
+    except Exception as e:
+        print(f"Hashtag generation error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate hashtags: {str(e)}"
+        )
+
+
+@router.get("/ai-providers", response_model=schemas.AIProvidersResponse)
+async def get_ai_providers(
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """
+    Get information about available AI providers
+    """
+    return ai_service.get_provider_info()
+
+
+@router.get("/suggest-post-time", response_model=schemas.PostTimeResponse)
+async def suggest_post_time(
+    platform: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """
+    Get suggested optimal posting time for a platform
+    
+    - **platform**: Target platform (TWITTER, LINKEDIN, FACEBOOK, INSTAGRAM)
+    """
+    valid_platforms = ["TWITTER", "LINKEDIN", "FACEBOOK", "INSTAGRAM"]
+    
+    if platform.upper() not in valid_platforms:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid platform: {platform}. Must be one of: {', '.join(valid_platforms)}"
+        )
+    
+    suggestion = await ai_service.suggest_post_time(platform.upper())
+    
+    return {
+        "platform": platform.upper(),
+        **suggestion
+    }
 
 @router.post("/transcribe")
 async def transcribe_audio(
