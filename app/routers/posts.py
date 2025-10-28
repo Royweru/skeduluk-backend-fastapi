@@ -5,7 +5,8 @@ from typing import List, Optional
 from datetime import datetime
 from .. import auth, schemas, models
 from ..database import get_async_db
-from app.services.post_service import ai_service,PostService
+from app.services.post_service import PostService
+from app.services.ai_service import ai_service
 from ..crud import PostCRUD
 router = APIRouter(prefix="/posts", tags=["posts"])
 
