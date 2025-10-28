@@ -19,7 +19,7 @@ class EmailService:
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
         self.smtp_username = os.getenv("SMTP_USERNAME")
         self.smtp_password = os.getenv("SMTP_PASSWORD")
-        self.from_email = os.getenv("FROM_EMAIL", "noreply@socialscheduler.com")
+        self.from_email = os.getenv("FROM_EMAIL", "noreply@skeduluk.com")
         self.from_name = os.getenv("FROM_NAME", "Skeduluk")
     
     def _create_message(
@@ -101,7 +101,7 @@ class EmailService:
             """
             
             text_template = """
-            Welcome to Social Scheduler!
+            Welcome to Skeduluk!
             
             Hi there!
             
@@ -115,7 +115,7 @@ class EmailService:
             
             msg = self._create_message(
                 to_email=email,
-                subject="Verify Your Email - Social Scheduler",
+                subject="Verify Your Email - Skeduluk",
                 html_content=html_content,
                 text_content=text_content
             )
@@ -167,7 +167,7 @@ class EmailService:
             
             msg = self._create_message(
                 to_email=email,
-                subject="Reset Your Password - Social Scheduler",
+                subject="Reset Your Password - Skeduluk",
                 html_content=html_content
             )
             
