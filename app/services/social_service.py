@@ -269,3 +269,118 @@ class SocialService:
                     "success": False,
                     "error": f"LinkedIn API error: {post_response.text}"
                 }
+class TwitterService:
+    """Service for Twitter API v2 operations"""
+    
+    @staticmethod
+    async def post_tweet(
+        access_token: str,
+        text: str,
+        media_ids: Optional[list] = None,
+        reply_to_tweet_id: Optional[str] = None,
+        quote_tweet_id: Optional[str] = None
+    ) -> Dict:
+        """
+        Post a tweet using Twitter API v2
+        
+        Args:
+            access_token: OAuth 2.0 access token
+            text: Tweet text (max 280 characters)
+            media_ids: List of media IDs to attach
+            reply_to_tweet_id: Tweet ID to reply to
+            quote_tweet_id: Tweet ID to quote
+        
+        Returns:
+            Dict with tweet data or error
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                payload = {"text": text}
+                
+                # Add media if provided
+                if media_ids:
+                    payload["media"] = {"media_ids": media_ids}
+                
+                # Add reply settings if replying
+                if reply_to_tweet_id:
+                    payload["reply"] = {"in_reply_to_tweet_id": reply_to_tweet_id}
+                
+                # Add quote tweet if quoting
+                if quote_tweet_id:
+                    payload["quote_tweet_id"] = quote_tweet_id
+                
+                response = await client.post(
+                    "https://api.twitter.com/2/tweets",
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json"
+                    }
+                )
+                
+                if response.status_code == 201:
+                    return {
+                        "success": True,
+                        "data": response.json()
+                    }
+                else:
+                    error_data = response.json()
+                    return {
+                        "success": False,
+                        "error": error_data.get("detail", "Failed to post tweet"),
+                        "status_code": response.status_code
+                    }
+                    
+        except Exception as e:
+            print(f"Error posting tweet: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    @staticmethod
+    async def delete_tweet(access_token: str, tweet_id: str) -> Dict:
+        """Delete a tweet"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.delete(
+                    f"https://api.twitter.com/2/tweets/{tweet_id}",
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+                
+                if response.status_code == 200:
+                    return {"success": True, "data": response.json()}
+                else:
+                    return {
+                        "success": False,
+                        "error": response.json().get("detail", "Failed to delete tweet")
+                    }
+                    
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    @staticmethod
+    async def get_user_tweets(
+        access_token: str,
+        user_id: str,
+        max_results: int = 10
+    ) -> Dict:
+        """Get user's recent tweets"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"https://api.twitter.com/2/users/{user_id}/tweets",
+                    params={"max_results": max_results},
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+                
+                if response.status_code == 200:
+                    return {"success": True, "data": response.json()}
+                else:
+                    return {
+                        "success": False,
+                        "error": response.json().get("detail", "Failed to fetch tweets")
+                    }
+                    
+        except Exception as e:
+            return {"success": False, "error": str(e)}

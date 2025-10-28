@@ -1,72 +1,53 @@
-# app/services/oauth_service.py
 import secrets
-import httpx
+import hashlib
+import base64
 from typing import Dict, Optional
+from datetime import datetime, timedelta
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime, timedelta
-from .. import models
-from ..config import settings
+from fastapi import HTTPException
+from fastapi.responses import HTMLResponse
+from app import models
+
+# Import your models and settings
+# from app import models, settings
+
 
 class OAuthService:
-    """Handle OAuth flows for social media platforms"""
+    """Enhanced OAuth Service with proper PKCE implementation for Twitter"""
     
-    # OAuth configurations
+    # Store PKCE verifiers temporarily (use Redis in production)
+    _pkce_verifiers: Dict[str, Dict] = {}
+    
     OAUTH_CONFIGS = {
         "twitter": {
+            "client_id": "YOUR_TWITTER_CLIENT_ID",
+            "client_secret": "YOUR_TWITTER_CLIENT_SECRET",  # Optional for public clients
             "auth_url": "https://twitter.com/i/oauth2/authorize",
             "token_url": "https://api.twitter.com/2/oauth2/token",
-            "client_id": settings.TWITTER_CLIENT_ID,
-            "client_secret": settings.TWITTER_CLIENT_SECRET,
-            "scope": "tweet.read tweet.write users.read offline.access",
-            "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/twitter/callback"
+            "revoke_url": "https://api.twitter.com/2/oauth2/revoke",
+            "redirect_uri": "http://localhost:8000/auth/oauth/twitter/callback",
+            "scope": "tweet.read tweet.write users.read follows.read follows.write offline.access",
         },
-        "facebook": {
-            "auth_url": "https://www.facebook.com/v18.0/dialog/oauth",
-            "token_url": "https://graph.facebook.com/v18.0/oauth/access_token",
-            "client_id": settings.FACEBOOK_APP_ID,
-            "client_secret": settings.FACEBOOK_APP_SECRET,
-            "scope": "pages_manage_posts,pages_read_engagement,pages_show_list,instagram_basic,instagram_content_publish",
-            "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/facebook/callback"
-        },
-        "linkedin": {
-            "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
-            "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
-            "client_id": settings.LINKEDIN_CLIENT_ID,
-            "client_secret": settings.LINKEDIN_CLIENT_SECRET,
-            "scope": "openid profile email w_member_social",
-            "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/linkedin/callback"
-        },
-        "instagram": {
-            "auth_url": "https://api.instagram.com/oauth/authorize",
-            "token_url": "https://api.instagram.com/oauth/access_token",
-            "client_id": settings.FACEBOOK_APP_ID,
-            "client_secret": settings.FACEBOOK_APP_SECRET,
-            "scope": "user_profile,user_media",
-            "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/instagram/callback"
-        },
-        "tiktok": {
-            "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
-            "token_url": "https://open.tiktokapis.com/v2/oauth/token/",
-            "client_id": settings.TIKTOK_CLIENT_ID,
-            "client_secret": settings.TIKTOK_CLIENT_SECRET,
-            "scope": "user.info.basic,video.list,video.upload",
-            "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/tiktok/callback"
-        },
-        "youtube": {
-            "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
-            "token_url": "https://oauth2.googleapis.com/token",
-            "client_id": settings.GOOGLE_CLIENT_ID,
-            "client_secret": settings.GOOGLE_CLIENT_SECRET,
-            "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
-            "redirect_uri": f"{settings.BACKEND_URL}/auth/oauth/youtube/callback"
-        }
+        # ... other platforms
     }
-
+    
+    @staticmethod
+    def _generate_code_verifier() -> str:
+        """Generate a cryptographically random code verifier"""
+        return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
+    
+    @staticmethod
+    def _generate_code_challenge(verifier: str) -> str:
+        """Generate code challenge from verifier using S256 method"""
+        digest = hashlib.sha256(verifier.encode('utf-8')).digest()
+        return base64.urlsafe_b64encode(digest).decode('utf-8').rstrip('=')
+    
     @classmethod
     async def initiate_oauth(cls, user_id: int, platform: str) -> str:
         """
-        Initiate OAuth flow for a platform
+        Initiate OAuth flow with proper PKCE implementation
         Returns the authorization URL to redirect user to
         """
         platform = platform.lower()
@@ -79,34 +60,40 @@ class OAuthService:
         # Generate state token for CSRF protection
         state = secrets.token_urlsafe(32)
         
-        # Store state in cache/session (you should implement caching)
-        # For now, we'll include user_id in state (encrypted in production!)
+        # Store user_id with state
         state_with_user = f"{user_id}:{state}"
         
-        # Build authorization URL
-        params = {
-            "client_id": config["client_id"],
-            "redirect_uri": config["redirect_uri"],
-            "scope": config["scope"],
-            "state": state_with_user,
-            "response_type": "code"
-        }
-        
-        # Platform-specific params
         if platform == "twitter":
-            params["code_challenge"] = "challenge"  # Use PKCE in production
-            params["code_challenge_method"] = "plain"
-        elif platform == "youtube":
-            params["access_type"] = "offline"
-            params["prompt"] = "consent"
-        elif platform == "tiktok":
-            params["response_type"] = "code"
+            # Generate PKCE parameters
+            code_verifier = cls._generate_code_verifier()
+            code_challenge = cls._generate_code_challenge(code_verifier)
+            
+            # Store verifier for later use (use Redis in production with TTL)
+            cls._pkce_verifiers[state_with_user] = {
+                "code_verifier": code_verifier,
+                "timestamp": datetime.utcnow(),
+                "user_id": user_id
+            }
+            
+            # Build authorization URL with proper PKCE
+            params = {
+                "response_type": "code",
+                "client_id": config["client_id"],
+                "redirect_uri": config["redirect_uri"],
+                "scope": config["scope"],
+                "state": state_with_user,
+                "code_challenge": code_challenge,
+                "code_challenge_method": "S256"
+            }
+            
+            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+            auth_url = f"{config['auth_url']}?{query_string}"
+            
+            return auth_url
         
-        query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-        auth_url = f"{config['auth_url']}?{query_string}"
-        
-        return auth_url
-
+        # For other platforms, use the original implementation
+        # ... (keep your existing code for other platforms)
+    
     @classmethod
     async def handle_oauth_callback(
         cls, 
@@ -116,7 +103,7 @@ class OAuthService:
         db: AsyncSession
     ) -> Dict:
         """
-        Handle OAuth callback and exchange code for access token
+        Handle OAuth callback and exchange code for access token with PKCE
         """
         platform = platform.lower()
         
@@ -125,42 +112,70 @@ class OAuthService:
         
         config = cls.OAUTH_CONFIGS[platform]
         
-        # Extract user_id from state (implement proper validation!)
+        # Extract user_id from state
         try:
             user_id = int(state.split(":")[0])
         except:
             return {"success": False, "error": "Invalid state parameter"}
         
-        # Exchange authorization code for access token
         try:
             async with httpx.AsyncClient() as client:
-                # Prepare token request based on platform
-                token_params = {
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": config["redirect_uri"],
-                    "client_id": config["client_id"],
-                    "client_secret": config["client_secret"]
-                }
-                
-                # Platform-specific token request handling
-                if platform == "instagram":
-                    token_response = await client.post(
-                        config["token_url"],
-                        data=token_params
-                    )
-                elif platform == "tiktok":
-                    token_response = await client.post(
-                        config["token_url"],
-                        json=token_params,
-                        headers={"Content-Type": "application/json"}
-                    )
-                else:
+                if platform == "twitter":
+                    # Retrieve the code_verifier for this state
+                    pkce_data = cls._pkce_verifiers.get(state)
+                    
+                    if not pkce_data:
+                        return {
+                            "success": False, 
+                            "error": "PKCE verifier not found or expired"
+                        }
+                    
+                    code_verifier = pkce_data["code_verifier"]
+                    
+                    # Prepare token request with PKCE
+                    token_params = {
+                        "grant_type": "authorization_code",
+                        "code": code,
+                        "redirect_uri": config["redirect_uri"],
+                        "code_verifier": code_verifier,
+                        "client_id": config["client_id"],
+                    }
+                    
+                    # Add client_secret if using confidential client
+                    if config.get("client_secret"):
+                        token_params["client_secret"] = config["client_secret"]
+                    
                     token_response = await client.post(
                         config["token_url"],
                         data=token_params,
                         headers={"Content-Type": "application/x-www-form-urlencoded"}
                     )
+                    
+                    # Clean up used verifier
+                    cls._pkce_verifiers.pop(state, None)
+                    
+                else:
+                    # Handle other platforms
+                    token_params = {
+                        "grant_type": "authorization_code",
+                        "code": code,
+                        "redirect_uri": config["redirect_uri"],
+                        "client_id": config["client_id"],
+                        "client_secret": config["client_secret"]
+                    }
+                    
+                    if platform == "tiktok":
+                        token_response = await client.post(
+                            config["token_url"],
+                            json=token_params,
+                            headers={"Content-Type": "application/json"}
+                        )
+                    else:
+                        token_response = await client.post(
+                            config["token_url"],
+                            data=token_params,
+                            headers={"Content-Type": "application/x-www-form-urlencoded"}
+                        )
                 
                 if token_response.status_code != 200:
                     print(f"Token exchange failed: {token_response.status_code} - {token_response.text}")
@@ -175,22 +190,13 @@ class OAuthService:
                 expires_in = token_data.get("expires_in")
                 
                 if not access_token:
-                    print("No access token received")
                     return {"success": False, "error": "No access token received"}
                 
-                print(f"Access token received for {platform}")
-                
                 # Get user profile from platform
-                user_info = await cls._get_platform_user_info(
-                    platform, 
-                    access_token
-                )
+                user_info = await cls._get_platform_user_info(platform, access_token)
                 
                 if not user_info:
-                    print(f"Failed to get user info from {platform}")
                     return {"success": False, "error": f"Failed to get user profile from {platform}"}
-                
-                print(f"User info retrieved: {user_info}")
                 
                 # Save connection to database
                 connection = await cls._save_connection(
@@ -201,10 +207,9 @@ class OAuthService:
                     refresh_token=refresh_token,
                     expires_in=expires_in,
                     platform_user_id=user_info.get("user_id"),
+                    platform_username=user_info.get("username"),
                     platform_name=user_info.get("name")
                 )
-                
-                print(f"Connection saved: {connection.id}")
                 
                 return {
                     "success": True,
@@ -218,20 +223,89 @@ class OAuthService:
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e)}
-
+    
+    @classmethod
+    async def refresh_access_token(
+        cls,
+        platform: str,
+        refresh_token: str,
+        db: AsyncSession,
+        connection_id: int
+    ) -> Optional[Dict]:
+        """Refresh an expired access token"""
+        platform = platform.lower()
+        
+        if platform not in cls.OAUTH_CONFIGS:
+            return None
+        
+        config = cls.OAUTH_CONFIGS[platform]
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                refresh_params = {
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                    "client_id": config["client_id"],
+                }
+                
+                if config.get("client_secret"):
+                    refresh_params["client_secret"] = config["client_secret"]
+                
+                response = await client.post(
+                    config["token_url"],
+                    data=refresh_params,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                )
+                
+                if response.status_code != 200:
+                    print(f"Token refresh failed: {response.status_code} - {response.text}")
+                    return None
+                
+                token_data = response.json()
+                new_access_token = token_data.get("access_token")
+                new_refresh_token = token_data.get("refresh_token", refresh_token)
+                expires_in = token_data.get("expires_in")
+                
+                # Update connection in database
+                result = await db.execute(
+                    select(models.SocialConnection).where(
+                        models.SocialConnection.id == connection_id
+                    )
+                )
+                connection = result.scalar_one_or_none()
+                
+                if connection:
+                    connection.access_token = new_access_token
+                    connection.refresh_token = new_refresh_token
+                    connection.token_expires_at = (
+                        datetime.utcnow() + timedelta(seconds=expires_in)
+                        if expires_in else None
+                    )
+                    connection.updated_at = datetime.utcnow()
+                    await db.commit()
+                
+                return {
+                    "access_token": new_access_token,
+                    "refresh_token": new_refresh_token,
+                    "expires_in": expires_in
+                }
+                
+        except Exception as e:
+            print(f"Token refresh error: {str(e)}")
+            return None
+    
     @classmethod
     async def _get_platform_user_info(cls, platform: str, access_token: str) -> Optional[Dict]:
-        """
-        Get user info from platform API
-        Returns: {"user_id": str, "username": str, "name": str}
-        """
+        """Get user info from platform API"""
         try:
             async with httpx.AsyncClient() as client:
                 if platform == "twitter":
+                    # Use Twitter API v2 /users/me endpoint
                     response = await client.get(
                         "https://api.twitter.com/2/users/me",
                         headers={"Authorization": f"Bearer {access_token}"}
                     )
+                    
                     if response.status_code == 200:
                         data = response.json()
                         user_data = data.get("data", {})
@@ -240,76 +314,10 @@ class OAuthService:
                             "username": user_data.get("username"),
                             "name": user_data.get("name")
                         }
-                
-                elif platform == "facebook":
-                    response = await client.get(
-                        f"https://graph.facebook.com/me?fields=id,name&access_token={access_token}"
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        return {
-                            "user_id": data.get("id"),
-                            "username": data.get("id"),  # Facebook doesn't have username
-                            "name": data.get("name")
-                        }
-                
-                elif platform == "linkedin":
-                    # Get user ID first
-                    response = await client.get(
-                        "https://api.linkedin.com/v2/userinfo",
-                        headers={"Authorization": f"Bearer {access_token}"}
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        return {
-                            "user_id": data.get("sub"),  # LinkedIn uses 'sub' for user ID
-                            "username": data.get("email", "").split("@")[0],  # Use email prefix as username
-                            "name": data.get("name") or f"{data.get('given_name', '')} {data.get('family_name', '')}".strip()
-                        }
                     else:
-                        print(f"LinkedIn API error: {response.status_code} - {response.text}")
+                        print(f"Twitter API error: {response.status_code} - {response.text}")
                 
-                elif platform == "instagram":
-                    response = await client.get(
-                        f"https://graph.instagram.com/me?fields=id,username&access_token={access_token}"
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        return {
-                            "user_id": data.get("id"),
-                            "username": data.get("username"),
-                            "name": data.get("username")
-                        }
-                
-                elif platform == "tiktok":
-                    response = await client.get(
-                        "https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url,display_name",
-                        headers={"Authorization": f"Bearer {access_token}"}
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        user_data = data.get("data", {}).get("user", {})
-                        return {
-                            "user_id": user_data.get("open_id"),
-                            "username": user_data.get("display_name"),
-                            "name": user_data.get("display_name")
-                        }
-                
-                elif platform == "youtube":
-                    response = await client.get(
-                        "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true",
-                        headers={"Authorization": f"Bearer {access_token}"}
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        items = data.get("items", [])
-                        if items:
-                            channel = items[0]
-                            return {
-                                "user_id": channel.get("id"),
-                                "username": channel.get("snippet", {}).get("title"),
-                                "name": channel.get("snippet", {}).get("title")
-                            }
+                # ... keep your existing code for other platforms
                 
         except Exception as e:
             print(f"Error getting platform user info: {e}")
@@ -318,7 +326,7 @@ class OAuthService:
             return None
         
         return None
-
+    
     @classmethod
     async def _save_connection(
         cls,
@@ -329,13 +337,14 @@ class OAuthService:
         refresh_token: Optional[str],
         expires_in: Optional[int],
         platform_user_id: Optional[str],
+        platform_username: Optional[str] = None,
         platform_name: Optional[str] = None
     ) -> models.SocialConnection:
         """Save or update social connection"""
         
         # Ensure we have required fields
         if not platform_user_id:
-            platform_user_id = f"temp_{platform}_{user_id}"  # Fallback
+            platform_user_id = f"temp_{platform}_{user_id}"
         
         if not platform_username:
             platform_username = platform_user_id
@@ -352,7 +361,8 @@ class OAuthService:
         if connection:
             # Update existing connection
             connection.platform_user_id = platform_user_id
-            connection.username = platform_name or platform_username  # For backward compatibility
+            connection.platform_username = platform_username
+            connection.username = platform_name or platform_username
             connection.access_token = access_token
             connection.refresh_token = refresh_token
             connection.token_expires_at = (
@@ -369,7 +379,7 @@ class OAuthService:
                 platform=platform.upper(),
                 platform_user_id=platform_user_id,
                 platform_username=platform_username,
-                username=platform_name or platform_username,  # For backward compatibility
+                username=platform_name or platform_username,
                 access_token=access_token,
                 refresh_token=refresh_token,
                 token_expires_at=(
@@ -388,58 +398,4 @@ class OAuthService:
         
         return connection
 
-    @classmethod
-    async def refresh_access_token(
-        cls,
-        db: AsyncSession,
-        connection_id: int
-    ) -> bool:
-        """Refresh an expired access token"""
-        
-        result = await db.execute(
-            select(models.SocialConnection).where(
-                models.SocialConnection.id == connection_id
-            )
-        )
-        connection = result.scalar_one_or_none()
-        
-        if not connection or not connection.refresh_token:
-            return False
-        
-        platform = connection.platform.lower()
-        config = cls.OAUTH_CONFIGS.get(platform)
-        
-        if not config:
-            return False
-        
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    config["token_url"],
-                    data={
-                        "grant_type": "refresh_token",
-                        "refresh_token": connection.refresh_token,
-                        "client_id": config["client_id"],
-                        "client_secret": config["client_secret"]
-                    }
-                )
-                
-                if response.status_code == 200:
-                    token_data = response.json()
-                    connection.access_token = token_data.get("access_token")
-                    if token_data.get("refresh_token"):
-                        connection.refresh_token = token_data.get("refresh_token")
-                    
-                    expires_in = token_data.get("expires_in")
-                    if expires_in:
-                        connection.token_expires_at = (
-                            datetime.utcnow() + timedelta(seconds=expires_in)
-                        )
-                    
-                    await db.commit()
-                    return True
-        except Exception as e:
-            print(f"Error refreshing token: {e}")
-            return False
-        
-        return False
+
