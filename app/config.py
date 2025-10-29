@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     
     # JWT - MUST be set
     SECRET_KEY: str
-    ACCESS_TOKEN_EXPIRE_HOURS: int = 24
+    ACCESS_TOKEN_EXPIRE_HOURS: int = 2
     
     # ========== OPTIONAL FIELDS WITH DEFAULTS ==========
     
