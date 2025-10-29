@@ -393,9 +393,9 @@ Hashtags:"""
         
         return best_times.get(platform.upper(), {"day": "Weekday", "time": "09:00 AM - 05:00 PM"})
     
-    def get_provider_info(self) -> Dict[str, bool]:
+    def get_provider_info(self):
         """Get information about available AI providers"""
-        return {
+        info = {
             "groq": self.groq_client is not None,
             "gemini": self.gemini_client is not None,
             "openai": self.openai_client is not None,
@@ -403,6 +403,19 @@ Hashtags:"""
             "grok": self.grok_client is not None,
             "configured_provider": self.provider
         }
+        
+        # Debug logging
+        print(f"✓ AI Provider Info: {info}")
+        
+        # Validate types match schema
+        assert isinstance(info["groq"], bool), f"groq should be bool, got {type(info['groq'])}"
+        assert isinstance(info["gemini"], bool), f"gemini should be bool, got {type(info['gemini'])}"
+        assert isinstance(info["openai"], bool), f"openai should be bool, got {type(info['openai'])}"
+        assert isinstance(info["anthropic"], bool), f"anthropic should be bool, got {type(info['anthropic'])}"
+        assert isinstance(info["grok"], bool), f"grok should be bool, got {type(info['grok'])}"
+        assert isinstance(info["configured_provider"], str), f"configured_provider should be str, got {type(info['configured_provider'])}"
+        
+        return info
 
 
 # Singleton instance
