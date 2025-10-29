@@ -1,7 +1,7 @@
 # app/tasks/scheduled_tasks.py
 from datetime import datetime
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from .celery_app import celery_app
+from ..celery_app import celery_app
 from ..database import get_async_database_url
 from ..database import AsyncSessionLocal
 from ..crud import PostCRUD,SocialConnectionCRUD,PostResultCRUD,SubscriptionCRUD
