@@ -244,7 +244,6 @@ async def debug_ai_providers(
         "google_key_exists": bool(os.getenv("GOOGLE_API_KEY")),
         "openai_key_exists": bool(os.getenv("OPENAI_API_KEY")),
         "anthropic_key_exists": bool(os.getenv("ANTHROPIC_API_KEY")),
-        "xai_key_exists": bool(os.getenv("XAI_API_KEY")),
         "configured_provider": os.getenv("AI_PROVIDER", "groq"),
         "gemini_client_initialized": ai_service.gemini_client is not None
     }
