@@ -224,7 +224,7 @@ async def generate_hashtags(
         )
 
 
-@router.get("/ai-providers", response_model=schemas.AIProvidersResponse)
+@router.get("/ai-providers/info", response_model=schemas.AIProvidersResponse)
 async def get_ai_providers(
     current_user: models.User = Depends(auth.get_current_active_user)
 ):

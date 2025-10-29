@@ -3,7 +3,7 @@ from celery import Celery
 from ..config import settings
 
 celery_app = Celery(
-    "social_scheduler",
+    "app",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND
 )
