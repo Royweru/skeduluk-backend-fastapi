@@ -8,7 +8,11 @@ from ..database import get_async_db
 from app.services.post_service import PostService
 from app.services.ai_service import ai_service
 from ..crud import PostCRUD
+from dotenv import load_dotenv
+import os
 router = APIRouter(prefix="/posts", tags=["posts"])
+
+load_dotenv()
 
 @router.post("/", response_model=schemas.PostResponse)
 async def create_post(
@@ -229,6 +233,21 @@ async def get_ai_providers(
     """
     return ai_service.get_provider_info()
 
+@router.get("/ai-providers/debug")
+async def debug_ai_providers(
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Debug AI provider configuration"""
+    return {
+        "groq_key_exists": bool(os.getenv("GROQ_API_KEY")),
+        "gemini_key_exists": bool(os.getenv("GEMINI_API_KEY")),
+        "google_key_exists": bool(os.getenv("GOOGLE_API_KEY")),
+        "openai_key_exists": bool(os.getenv("OPENAI_API_KEY")),
+        "anthropic_key_exists": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "xai_key_exists": bool(os.getenv("XAI_API_KEY")),
+        "configured_provider": os.getenv("AI_PROVIDER", "groq"),
+        "gemini_client_initialized": ai_service.gemini_client is not None
+    }
 
 @router.get("/suggest-post-time", response_model=schemas.PostTimeResponse)
 async def suggest_post_time(

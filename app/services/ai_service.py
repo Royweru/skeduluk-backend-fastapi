@@ -28,10 +28,10 @@ class AIService:
         
         # Initialize clients based on available API keys
         groq_key = os.getenv("GROQ_API_KEY")
-        gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        gemini_key = os.getenv("GOOGLE_API_KEY")
         openai_key = os.getenv("OPENAI_API_KEY")
         anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        grok_key = os.getenv("XAI_API_KEY")
+    
         
         # Initialize Groq (OpenAI-compatible, very fast)
         if groq_key:
@@ -56,13 +56,7 @@ class AIService:
             self.anthropic_client = AsyncAnthropic(api_key=anthropic_key)
             print("✓ Anthropic client initialized")
         
-        # Initialize Grok (X.AI)
-        if grok_key:
-            self.grok_client = AsyncOpenAI(
-                api_key=grok_key,
-                base_url="https://api.x.ai/v1"
-            )
-            print("✓ Grok client initialized")
+       
         
         # Platform character limits
         self.platform_limits = {
