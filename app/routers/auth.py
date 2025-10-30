@@ -166,10 +166,12 @@ async def reset_password(
 
 @router.post("/test-email")
 async def test_email(
-    email:Annotated[str, Body(..., embed=True)] = 'weruroy347@gmail.com'
+    email: str = Body(default='weruroy347@gmail.com', embed=True)  
 ):
     """Test endpoint to verify email configuration"""
     from ..services.email_service import emaill_service
+    
+    print(f"📧 Sending test email to: {email}")
     
     result = await emaill_service.send_verification_email(
         email,
@@ -178,7 +180,8 @@ async def test_email(
     
     return {
         "success": result,
-        "message": "Check console logs for details"
+        "message": f"Email {'sent successfully' if result else 'failed to send'}",
+        "email": email
     }
 
 # ============== OAuth Routes ==============
