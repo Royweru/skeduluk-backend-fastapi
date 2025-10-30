@@ -164,7 +164,7 @@ async def reset_password(
     
     return {"message": "Password reset successfully!"}
 
-@router.get("/test-email")
+@router.post("/test-email")
 async def test_email(
     email:Annotated[str, Body()] = 'weruroy347@gmail.com'
 ):
