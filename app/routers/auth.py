@@ -166,7 +166,7 @@ async def reset_password(
 
 @router.post("/test-email")
 async def test_email(
-    email:Annotated[str, Body()] = 'weruroy347@gmail.com'
+    email:Annotated[str, Body(..., embed=True)] = 'weruroy347@gmail.com'
 ):
     """Test endpoint to verify email configuration"""
     from ..services.email_service import emaill_service
