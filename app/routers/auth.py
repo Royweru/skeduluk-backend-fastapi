@@ -165,12 +165,14 @@ async def reset_password(
     return {"message": "Password reset successfully!"}
 
 @router.get("/test-email")
-async def test_email():
+async def test_email(
+    email:Annotated[str, Body()] = 'weruroy347@gmail.com'
+):
     """Test endpoint to verify email configuration"""
     from ..services.email_service import emaill_service
     
     result = await emaill_service.send_verification_email(
-        "your-test-email@example.com",
+        email,
         "test-token-123"
     )
     
