@@ -117,39 +117,28 @@ class AuthService:
     @staticmethod
     async def authenticate_user(
         db: AsyncSession,
-        username: str,
+        username_or_email: str,
         password: str
     ) -> Optional[models.User]:
-        """Authenticate user with username/email and password"""
-
-        # Try to find user by username or email
+        """Authenticate user by username or email"""
+        
+        # Try username first
         result = await db.execute(
-            select(models.User).where(
-                (models.User.username == username) | (models.User.email == username)
-            )
+            select(models.User).where(models.User.username == username_or_email)
         )
         user = result.scalar_one_or_none()
-
+        
+        # Try email if username not found
         if not user:
+            result = await db.execute(
+                select(models.User).where(models.User.email == username_or_email)
+            )
+            user = result.scalar_one_or_none()
+        
+        # Verify password
+        if not user or not verify_password(password, user.hashed_password):
             return None
-
-        # Verify password using auth.py function
-        if not verify_password(password, user.hashed_password):
-            return None
-
-        # Check if email is verified
-        if not user.is_email_verified:
-            return None
-
-        # Check if account is active
-        if not user.is_active:
-            return None
-
-        # Update last login
-        user.last_login = datetime.utcnow()
-        await db.commit()
-        await db.refresh(user)
-
+            
         return user
 
     @staticmethod

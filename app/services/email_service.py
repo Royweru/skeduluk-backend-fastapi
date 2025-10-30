@@ -8,9 +8,10 @@ from typing import Dict, Any, Optional
 from jinja2 import Template
 import ssl
 from dotenv import load_dotenv
+import asyncio
 
+load_dotenv()
 
-load_dotenv()  # Load environment variables from .env file
 class EmailService:
     """Email sending service using SMTP"""
     
@@ -19,8 +20,12 @@ class EmailService:
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
         self.smtp_username = os.getenv("SMTP_USERNAME")
         self.smtp_password = os.getenv("SMTP_PASSWORD")
-        self.from_email = os.getenv("FROM_EMAIL", "noreply@skeduluk.com")
+        self.from_email = os.getenv("FROM_EMAIL", self.smtp_username)  # Use SMTP username as fallback
         self.from_name = os.getenv("FROM_NAME", "Skeduluk")
+        
+        # Validate configuration
+        if not self.smtp_username or not self.smtp_password:
+            print("⚠️  WARNING: SMTP credentials not configured. Email sending will fail.")
     
     def _create_message(
         self, 
@@ -46,26 +51,45 @@ class EmailService:
         
         return msg
     
-    def _send_email(self, msg: MIMEMultipart) -> bool:
-        """Send email using SMTP"""
+    def _send_email_sync(self, msg: MIMEMultipart) -> bool:
+        """Send email using SMTP (synchronous)"""
         try:
+            if not self.smtp_username or not self.smtp_password:
+                print("❌ Email not sent: SMTP credentials not configured")
+                return False
+                
             context = ssl.create_default_context()
             
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+            print(f"📧 Attempting to send email via {self.smtp_server}:{self.smtp_port}")
+            
+            with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=10) as server:
                 server.starttls(context=context)
                 server.login(self.smtp_username, self.smtp_password)
                 server.send_message(msg)
                 
+            print(f"✅ Email sent successfully to {msg['To']}")
             return True
             
-        except Exception as e:
-            print(f"SMTP Error: {e}")
+        except smtplib.SMTPAuthenticationError as e:
+            print(f"❌ SMTP Authentication Error: {e}")
+            print("💡 Check your SMTP_USERNAME and SMTP_PASSWORD")
             return False
+        except smtplib.SMTPException as e:
+            print(f"❌ SMTP Error: {e}")
+            return False
+        except Exception as e:
+            print(f"❌ Unexpected error sending email: {e}")
+            return False
+    
+    async def _send_email(self, msg: MIMEMultipart) -> bool:
+        """Async wrapper for sending email"""
+        # Run synchronous SMTP operation in thread pool
+        return await asyncio.to_thread(self._send_email_sync, msg)
     
     async def send_verification_email(self, email: str, verification_token: str) -> bool:
         """Send email verification email"""
         try:
-            verification_url = f"{os.getenv('FRONTEND_URL')}/verify-email?token={verification_token}"
+            verification_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/verify-email?token={verification_token}"
             
             html_template = """
             <!DOCTYPE html>
@@ -93,6 +117,7 @@ class EmailService:
                         <div style="text-align: center;">
                             <a href="{{ verification_url }}" class="button">Verify Email Address</a>
                         </div>
+                        <p>Or copy this link: {{ verification_url }}</p>
                         <p>This link expires in 24 hours.</p>
                     </div>
                 </div>
@@ -120,16 +145,16 @@ class EmailService:
                 text_content=text_content
             )
             
-            return self._send_email(msg)
+            return await self._send_email(msg)
             
         except Exception as e:
-            print(f"Failed to send verification email: {e}")
+            print(f"❌ Failed to send verification email: {e}")
             return False
     
     async def send_password_reset_email(self, email: str, reset_token: str) -> bool:
         """Send password reset email"""
         try:
-            reset_url = f"{os.getenv('FRONTEND_URL')}/reset-password?token={reset_token}"
+            reset_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/reset-password?token={reset_token}"
             
             html_template = """
             <!DOCTYPE html>
@@ -156,6 +181,7 @@ class EmailService:
                         <div style="text-align: center;">
                             <a href="{{ reset_url }}" class="button">Reset Password</a>
                         </div>
+                        <p>Or copy this link: {{ reset_url }}</p>
                         <p>This link expires in 1 hour.</p>
                     </div>
                 </div>
@@ -171,10 +197,10 @@ class EmailService:
                 html_content=html_content
             )
             
-            return self._send_email(msg)
+            return await self._send_email(msg)
             
         except Exception as e:
-            print(f"Failed to send password reset email: {e}")
+            print(f"❌ Failed to send password reset email: {e}")
             return False
-        
+
 emaill_service = EmailService()

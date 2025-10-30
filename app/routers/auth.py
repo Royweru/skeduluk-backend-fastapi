@@ -94,22 +94,41 @@ async def verify_email(
     return {"message": "Email verified successfully!"}
 
 
+# app/routers/auth.py
+
 @router.post("/token")
 async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """Login and get access token"""
+    """Login and get access token - accepts username or email"""
     
-    user = await AuthService.authenticate_user(
-        db, form_data.username, form_data.password
+    # Try to find user by username first
+    result = await db.execute(
+        select(models.User).where(models.User.username == form_data.username)
     )
+    user = result.scalar_one_or_none()
     
+    # If not found by username, try email
     if not user:
+        result = await db.execute(
+            select(models.User).where(models.User.email == form_data.username)
+        )
+        user = result.scalar_one_or_none()
+    
+    # Verify password
+    if not user or not auth.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Incorrect username/email or password",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    
+    if not user.is_email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email before logging in"
         )
     
     access_token_expires = timedelta(hours=settings.ACCESS_TOKEN_EXPIRE_HOURS)
@@ -118,7 +137,6 @@ async def login(
     )
     
     return {"access_token": access_token, "token_type": "bearer"}
-
 
 @router.post("/forgot-password")
 async def forgot_password(
@@ -146,6 +164,20 @@ async def reset_password(
     
     return {"message": "Password reset successfully!"}
 
+@router.get("/test-email")
+async def test_email():
+    """Test endpoint to verify email configuration"""
+    from ..services.email_service import emaill_service
+    
+    result = await emaill_service.send_verification_email(
+        "your-test-email@example.com",
+        "test-token-123"
+    )
+    
+    return {
+        "success": result,
+        "message": "Check console logs for details"
+    }
 
 # ============== OAuth Routes ==============
 
