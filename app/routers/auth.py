@@ -164,6 +164,7 @@ async def reset_password(
     
     return {"message": "Password reset successfully!"}
 
+# Add to your test endpoint
 @router.post("/test-email")
 async def test_email(
     email: str = Body(default='weruroy347@gmail.com', embed=True)  
@@ -171,17 +172,22 @@ async def test_email(
     """Test endpoint to verify email configuration"""
     from ..services.email_service import email_service
     
-    print(f"📧 Sending test email to: {email}")
+    print(f"📧 Testing email to: {email}")
+    print(f"SMTP Server: {email_service.smtp_server}:{email_service.smtp_port}")
+    print(f"SMTP Username configured: {bool(email_service.smtp_username)}")
+    print(f"SMTP Password configured: {bool(email_service.smtp_password)}")
     
-    result = await email_service.send_verification_email(
-        email,
-        "test-token-123"
-    )
+    result = await email_service.send_verification_email(email, "test-token-123")
     
     return {
         "success": result,
         "message": f"Email {'sent successfully' if result else 'failed to send'}",
-        "email": email
+        "email": email,
+        "config": {
+            "smtp_server": email_service.smtp_server,
+            "smtp_port": email_service.smtp_port,
+            "has_credentials": bool(email_service.smtp_username and email_service.smtp_password)
+        }
     }
 
 # ============== OAuth Routes ==============
