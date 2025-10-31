@@ -203,4 +203,4 @@ class EmailService:
             print(f"❌ Failed to send password reset email: {e}")
             return False
 
-emaill_service = EmailService()
+email_service = EmailService()

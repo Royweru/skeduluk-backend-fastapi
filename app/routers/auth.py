@@ -169,11 +169,11 @@ async def test_email(
     email: str = Body(default='weruroy347@gmail.com', embed=True)  
 ):
     """Test endpoint to verify email configuration"""
-    from ..services.email_service import emaill_service
+    from ..services.email_service import email_service
     
     print(f"📧 Sending test email to: {email}")
     
-    result = await emaill_service.send_verification_email(
+    result = await email_service.send_verification_email(
         email,
         "test-token-123"
     )
