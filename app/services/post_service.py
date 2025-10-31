@@ -1,4 +1,5 @@
 # app/services/post_service.py
+import json
 import os
 import uuid
 import boto3
@@ -66,31 +67,46 @@ class PostService:
     @staticmethod
     async def create_post(
         db: AsyncSession, 
-        post_data: schemas.PostCreate, 
-        user_id: int,
+        post: schemas.PostCreate,
+        user_id: int
     ) -> models.Post:
-        """Create a new post with support for platform-specific content"""
-        # Check user's plan limits
-        user = await crud.UserCRUD.get_user_by_id(db, user_id)
-        if not user:
-            raise ValueError("User not found")
+        """Create a new post with support for platform-specific content and videos"""
         
-        if user.posts_used >= user.posts_limit:
-            raise ValueError("Post limit reached for your current plan")
+        # --- FIX #1: Convert dict to JSON string (from last time) ---
+        enhanced_content_str = None
+        if post.enhanced_content:
+            enhanced_content_str = json.dumps(post.enhanced_content)
+
+        # --- FIX #2: Convert lists to JSON strings (for THIS error) ---
+        image_urls_str = json.dumps(post.image_urls or [])
+        video_urls_str = json.dumps(post.video_urls or [])
+        platforms_str = json.dumps(post.platforms) # This field is required
         
-        # Create post with platform-specific content
-        post = await crud.PostCRUD.create_post(
-            db, 
-            post_data, 
-            user_id,
+        db_post = models.Post(
+            user_id=user_id,
+            original_content=post.original_content,
+            enhanced_content=enhanced_content_str,
+            
+            # --- Use the new string versions ---
+            image_urls=image_urls_str,
+            video_urls=video_urls_str,
+            platforms=platforms_str,
+            
+            # --- Other fields ---
+            platform_specific_content=post.platform_specific_content,
+            audio_file_url=post.audio_file_url,
+            scheduled_for=post.scheduled_for,
+            status="scheduled" if post.scheduled_for else "draft",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow() # Make sure to set this on create
         )
+        db.add(db_post)
+        await db.commit()
+        await db.refresh(db_post)
         
-        # If not scheduled, publish immediately
-        if not post.scheduled_for:
-            from ..tasks.scheduled_tasks import publish_post_task
-            publish_post_task.delay(post.id)
+        await UserCRUD.increment_post_count(db, user_id)
         
-        return post
+        return db_post
     
     @staticmethod
     async def validate_media_file(
