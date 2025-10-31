@@ -15,7 +15,7 @@ class EmailService:
     def __init__(self):
         # Check for Resend API key first (preferred)
         self.resend_api_key = os.getenv("RESEND_API_KEY")
-        self.use_resend = bool(self.resend_api_key)
+        self.use_resend = False
         
         # SMTP fallback
         self.smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
