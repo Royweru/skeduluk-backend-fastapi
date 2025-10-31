@@ -337,7 +337,117 @@ async def generate_hashtags(
             detail=f"Failed to generate hashtags: {str(e)}"
         )
 
+@router.get("/calendar/events")
+async def get_calendar_events(
+    start_date: str,
+    end_date: str,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Get posts for calendar view within a date range
+    Returns both scheduled and published posts for calendar visualization
+    """
+    try:
+        # Parse dates
+        start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        
+        # Query posts within date range
+        from sqlalchemy import select, and_, or_
+        
+        query = select(models.Post).where(
+            and_(
+                models.Post.user_id == current_user.id,
+                or_(
+                    # Scheduled posts in range
+                    and_(
+                        models.Post.scheduled_for.isnot(None),
+                        models.Post.scheduled_for >= start,
+                        models.Post.scheduled_for <= end
+                    ),
+                    # Published posts in range (use created_at as fallback)
+                    and_(
+                        models.Post.scheduled_for.is_(None),
+                        models.Post.status == "posted",
+                        models.Post.created_at >= start,
+                        models.Post.created_at <= end
+                    )
+                )
+            )
+        ).order_by(models.Post.scheduled_for.desc(), models.Post.created_at.desc())
+        
+        result = await db.execute(query)
+        posts = result.scalars().all()
+        
+        # Format for calendar
+        events = []
+        for post in posts:
+            # Determine event date (scheduled or published date)
+            event_date = post.scheduled_for or post.created_at
+            
+            # Parse platforms
+            platforms_list = []
+            if isinstance(post.platforms, str):
+                try:
+                    platforms_list = json.loads(post.platforms)
+                except:
+                    platforms_list = [p.strip() for p in post.platforms.split(',') if p.strip()]
+            
+            # Get platform-specific content if available
+            content_preview = post.original_content[:100] + "..." if len(post.original_content) > 100 else post.original_content
+            
+            events.append({
+                "id": post.id,
+                "title": content_preview,
+                "content": post.original_content,
+                "start": event_date.isoformat(),
+                "end": event_date.isoformat(),  # Same as start for point events
+                "platforms": platforms_list,
+                "status": post.status,
+                "image_urls": json.loads(post.image_urls) if post.image_urls else [],
+                "is_scheduled": post.scheduled_for is not None,
+                "scheduled_for": post.scheduled_for.isoformat() if post.scheduled_for else None,
+                "created_at": post.created_at.isoformat(),
+                "error_message": post.error_message,
+                # Calendar-specific fields
+                "color": _get_status_color(post.status),
+                "allDay": False,  # Set to True if you want day-long events
+            })
+        
+        return {
+            "events": events,
+            "start_date": start_date,
+            "end_date": end_date,
+            "total": len(events)
+        }
+    
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {str(e)}"
+        )
+    except Exception as e:
+        print(f"Calendar events error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch calendar events: {str(e)}"
+        )
 
+
+def _get_status_color(status: str) -> str:
+    """Helper to assign colors to different post statuses"""
+    colors = {
+        "scheduled": "#3b82f6",  # blue
+        "processing": "#f59e0b",  # amber
+        "posting": "#8b5cf6",    # purple
+        "posted": "#10b981",     # green
+        "failed": "#ef4444",     # red
+        "draft": "#6b7280"       # gray
+    }
+    return colors.get(status, "#6b7280")
 @router.get("/ai-providers/info")
 async def get_ai_providers(
     current_user: models.User = Depends(auth.get_current_active_user)
