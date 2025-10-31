@@ -16,7 +16,6 @@ from app import models
 try:
     REDIS_URL = settings.CELERY_BROKER_URL
     
-    # Upstash requires SSL - ensure URL uses rediss:// or add ssl params
     if REDIS_URL.startswith("redis://") and "upstash.io" in REDIS_URL:
         REDIS_URL = REDIS_URL.replace("redis://", "rediss://")
         print(f"⚠️  Converted Redis URL to use SSL (rediss://)")
@@ -26,7 +25,7 @@ try:
     # Connect with SSL support
     redis_client = redis.from_url(
         REDIS_URL,
-        db=1,  # Use db=1 to keep OAuth state separate from Celery
+        db=0,  
         decode_responses=True,
         ssl_cert_reqs=None,  # Disable SSL certificate verification for Upstash
         socket_connect_timeout=10,
