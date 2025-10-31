@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-
+import json
 from . import models, schemas
 
 class UserCRUD:
@@ -245,26 +245,41 @@ class PostCRUD:
             )
         )
         return result.scalar_one_or_none()
-    
+
     @staticmethod
     async def create_post(
         db: AsyncSession, 
-        post: schemas.PostCreate, 
-        user_id: int,
-        platform_specific_content: Optional[Dict[str, Any]] = None  
+        post: schemas.PostCreate,  # This object has all the data we need
+        user_id: int
+        # REMOVED: platform_specific_content argument, as it's already in post
     ) -> models.Post:
         """Create a new post with support for platform-specific content and videos"""
+        
+        # --- FIX FOR TYPE MISMATCH ---
+        # Your 'enhanced_content' column is Text, but your schema sends a dict.
+        # We must convert the dict to a JSON string to store it in a Text column.
+        enhanced_content_str = None
+        if post.enhanced_content:
+            enhanced_content_str = json.dumps(post.enhanced_content)
+        
         db_post = models.Post(
             user_id=user_id,
             original_content=post.original_content,
+            
+            # --- FIX FOR DATA LOSS ---
+            # Use the data from the 'post' schema object, not separate arguments
+            enhanced_content=enhanced_content_str,
+            platform_specific_content=post.platform_specific_content,
             image_urls=post.image_urls or [],
-            video_urls=post.video_urls or [],
+            video_urls=post.video_urls or [], # You added this field in the schema, so let's use it
             audio_file_url=post.audio_file_url,
             platforms=post.platforms,
             scheduled_for=post.scheduled_for,
-            platform_specific_content=platform_specific_content,
+            
+            # --- FIX FOR THE CRASH ---
+            # REMOVED the 'ai_enhanced=False' line
+            
             status="scheduled" if post.scheduled_for else "draft",
-            ai_enhanced=False,
             created_at=datetime.utcnow()
         )
         db.add(db_post)
