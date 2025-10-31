@@ -1,4 +1,5 @@
 # app/services/post_service.py
+from datetime import datetime
 import json
 import os
 import uuid
@@ -104,7 +105,7 @@ class PostService:
         await db.commit()
         await db.refresh(db_post)
         
-        await UserCRUD.increment_post_count(db, user_id)
+        await crud.UserCRUD.increment_post_count(db, user_id)
         
         return db_post
     
