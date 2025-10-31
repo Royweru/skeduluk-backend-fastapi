@@ -68,7 +68,6 @@ class PostService:
         db: AsyncSession, 
         post_data: schemas.PostCreate, 
         user_id: int,
-        platform_specific_content: Optional[Dict[str, Any]] = None
     ) -> models.Post:
         """Create a new post with support for platform-specific content"""
         # Check user's plan limits
@@ -84,7 +83,6 @@ class PostService:
             db, 
             post_data, 
             user_id,
-            platform_specific_content=platform_specific_content
         )
         
         # If not scheduled, publish immediately

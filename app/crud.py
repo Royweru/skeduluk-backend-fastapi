@@ -251,7 +251,7 @@ class PostCRUD:
         db: AsyncSession, 
         post: schemas.PostCreate,  # This object has all the data we need
         user_id: int
-        # REMOVED: platform_specific_content argument, as it's already in post
+        
     ) -> models.Post:
         """Create a new post with support for platform-specific content and videos"""
         
@@ -275,10 +275,6 @@ class PostCRUD:
             audio_file_url=post.audio_file_url,
             platforms=post.platforms,
             scheduled_for=post.scheduled_for,
-            
-            # --- FIX FOR THE CRASH ---
-            # REMOVED the 'ai_enhanced=False' line
-            
             status="scheduled" if post.scheduled_for else "draft",
             created_at=datetime.utcnow()
         )
