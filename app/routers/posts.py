@@ -14,23 +14,18 @@ from app.services.post_service import PostService
 router = APIRouter(prefix="/posts", tags=["posts"])
 
 
-@router.post("/", response_model=schemas.PostResponse)
+@router.post("/", response_model=schemas.PostCreateResponse)
 async def create_post(
     original_content: str = Form(...),
     platforms: str = Form(...),
     scheduled_for: Optional[str] = Form(None),
     enhanced_content: Optional[str] = Form(None),
     images: Optional[List[UploadFile]] = File(None),
+    videos:Optional[List[UploadFile]]  =File(None),
     audio: Optional[UploadFile] = File(None),
     current_user: models.User = Depends(auth.get_current_active_user),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """
-    Create a new post
-    
-    - If scheduled_for is provided: post will be scheduled
-    - If scheduled_for is None: post will be published immediately
-    """
     try:
         # Parse JSON strings
         platforms_list = json.loads(platforms)

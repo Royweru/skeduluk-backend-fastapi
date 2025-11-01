@@ -1,4 +1,5 @@
 # app/schemas.py
+import json
 from pydantic import BaseModel, EmailStr, field_validator,Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -55,11 +56,7 @@ class SocialConnectionResponse(SocialConnectionBase):
     class Config:
         from_attributes = True
 
-# Post schemas
-class PostBase(BaseModel):
-    original_content: str
-    platforms: List[str]
-    scheduled_for: Optional[datetime] = None
+
 
 class PostCreate(PostBase):
     enhanced_content: Optional[Dict[str, str]] = None
@@ -74,19 +71,55 @@ class PostUpdate(BaseModel):
     scheduled_for: Optional[datetime] = None
     enhanced_content: Optional[Dict[str, str]] = None
 
+class PostBase(BaseModel):
+    original_content: str
+    platforms: List[str]
+    scheduled_for: Optional[datetime] = None
+
+    @field_validator('platforms', mode='before')
+    @classmethod
+    def parse_platforms(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return [] # Or raise error
+        return v
+
 class PostResponse(PostBase):
     id: int
     user_id: int
     enhanced_content: Optional[Dict[str, str]] = None
     image_urls: Optional[List[str]] = None
+    video_urls: Optional[List[str]] = None
     audio_file_url: Optional[str] = None
     status: str
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     
+    # --- ADD THIS VALIDATOR ---
+    @field_validator('image_urls', 'video_urls', 'enhanced_content', mode='before')
+    @classmethod
+    def parse_json_fields(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                # Default to empty/none for the type
+                return [] if isinstance(v, list) else None
+        return v
+
     class Config:
         from_attributes = True
+
+# --- ADD THIS NEW SCHEMA ---
+# This schema will correctly model your API's actual response
+class PostCreateResponse(PostResponse):
+    _message: Optional[str] = None
+    _task_id: Optional[str] = None
 
 class PostResultBase(BaseModel):
     platform: str
