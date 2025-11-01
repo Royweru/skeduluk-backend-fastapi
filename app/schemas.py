@@ -58,19 +58,6 @@ class SocialConnectionResponse(SocialConnectionBase):
 
 
 
-class PostCreate(PostBase):
-    enhanced_content: Optional[Dict[str, str]] = None
-    image_urls: Optional[List[str]] = None
-    video_urls: Optional[List[str]] = None
-    platform_specific_content: Optional[Dict[str, str]] = None
-    audio_file_url: Optional[str] = None
-
-class PostUpdate(BaseModel):
-    original_content: Optional[str] = None
-    platforms: Optional[List[str]] = None
-    scheduled_for: Optional[datetime] = None
-    enhanced_content: Optional[Dict[str, str]] = None
-
 class PostBase(BaseModel):
     original_content: str
     platforms: List[str]
@@ -85,6 +72,21 @@ class PostBase(BaseModel):
             except json.JSONDecodeError:
                 return [] # Or raise error
         return v
+    
+class PostCreate(PostBase):
+    enhanced_content: Optional[Dict[str, str]] = None
+    image_urls: Optional[List[str]] = None
+    video_urls: Optional[List[str]] = None
+    platform_specific_content: Optional[Dict[str, str]] = None
+    audio_file_url: Optional[str] = None
+
+class PostUpdate(BaseModel):
+    original_content: Optional[str] = None
+    platforms: Optional[List[str]] = None
+    scheduled_for: Optional[datetime] = None
+    enhanced_content: Optional[Dict[str, str]] = None
+
+
 
 class PostResponse(PostBase):
     id: int
