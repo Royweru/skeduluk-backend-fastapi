@@ -93,17 +93,15 @@ async def create_post(
             print(f"Post {post.id} queued for immediate publishing. Task ID: {task.id}")
             
             # Return success with helpful message
-            return {
-                **post.__dict__,
-                "_message": f"Post is being published to {len(platforms_list)} platform(s). This may take a few moments.",
-                "_task_id": task.id
-            }
+            response_data = post.dict()
+            response_data["_message"] = f"Post is being published to {len(platforms_list)} platform(s). This may take a few moments."
+            response_data["_task_id"] = task.id
+            return response_data
         else:
             # Scheduled post
-            return {
-                **post.__dict__,
-                "_message": f"Post scheduled for {scheduled_datetime.strftime('%B %d, %Y at %I:%M %p')}",
-            }
+            response_data = post.dict()
+            response_data["_message"] = f"Post scheduled for {scheduled_datetime.strftime('%B %d, %Y at %I:%M %p')}"
+            return response_data
     
     except HTTPException:
         raise
@@ -332,7 +330,7 @@ async def generate_hashtags(
             detail=f"Failed to generate hashtags: {str(e)}"
         )
 
-@router.get("/calendar/events")
+@router.get("/calendar/events", response_model=schemas.CalendarEventResponse)
 async def get_calendar_events(
     start_date: str,
     end_date: str,

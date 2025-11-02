@@ -17,7 +17,7 @@ def publish_post_task(post_id: int):
         async with AsyncSessionLocal(engine) as db:
             try:
                 # Get post
-                post = await PostCRUD.get_post_by_id(db, post_id, None)  # No user check for background task
+                post = await PostCRUD.get_post_by_id(db, post_id, None) 
                 if not post:
                     return {"success": False, "error": "Post not found"}
                 

@@ -254,3 +254,17 @@ class CalendarEvent(BaseModel):
     end: datetime
     platforms: List[str]
     status: str
+    content: str
+    image_urls: Optional[List[str]] = None
+    is_scheduled: bool
+    scheduled_for: Optional[datetime] = None
+    created_at: datetime
+    error_message: Optional[str] = None
+    color: str
+    allDay: bool
+
+class CalendarEventResponse(BaseModel):
+    events: List[CalendarEvent]
+    start_date: str
+    end_date: str
+    total: int
