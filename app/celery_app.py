@@ -1,22 +1,34 @@
 # app/celery_app.py
 from celery import Celery
-from celery.schedules import crontab
 import os
-from dotenv import load_dotenv
-import ssl  # <--- IMPORT SSL
+import ssl
 
-load_dotenv()
+# Get Redis URL from environment
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+# Configure broker and backend URLs with SSL parameters
+def configure_redis_url(url: str) -> dict:
+    """Configure Redis connection with SSL support for Upstash"""
+    if url.startswith('rediss://'):
+        # Return configuration dict with SSL settings
+        return {
+            'url': url,
+            'ssl': {
+                'ssl_cert_reqs': ssl.CERT_NONE,
+            }
+        }
+    return {'url': url}
 
 # Initialize Celery
 celery_app = Celery(
-    'social_media_manager',
-    broker=os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0'),
-    backend=os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0'),
-    include=['app.tasks.scheduled_tasks']
+    "social_scheduler",
+    broker=REDIS_URL,
+    backend=REDIS_URL,
 )
 
-# Celery Configuration
+# Configure Celery with SSL support
 celery_app.conf.update(
+    # Task settings
     task_serializer='json',
     accept_content=['json'],
     result_serializer='json',
@@ -27,27 +39,21 @@ celery_app.conf.update(
     task_soft_time_limit=25 * 60,
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
+    
+    # SSL Configuration for broker and backend
+    broker_use_ssl={
+        'ssl_cert_reqs': ssl.CERT_NONE,
+        'ssl_ca_certs': None,
+        'ssl_certfile': None,
+        'ssl_keyfile': None,
+    },
+    redis_backend_use_ssl={
+        'ssl_cert_reqs': ssl.CERT_NONE,
+        'ssl_ca_certs': None,
+        'ssl_certfile': None,
+        'ssl_keyfile': None,
+    },
 )
 
-# --- ADD THIS BLOCK TO FIX SSL ---
-broker_url = os.getenv('CELERY_BROKER_URL', '')
-if broker_url.startswith('rediss://'):
-    celery_app.conf.broker_transport_options = {
-        'ssl_cert_reqs': ssl.CERT_NONE
-    }
-    celery_app.conf.redis_backend_transport_options = {
-        'ssl_cert_reqs': ssl.CERT_NONE
-    }
-# --- END OF FIX ---
-
-
-# Periodic Tasks Schedule
-celery_app.conf.beat_schedule = {
-    'check-scheduled-posts-every-minute': {
-        'task': 'app.tasks.scheduled_tasks.check_scheduled_posts',
-        'schedule': crontab(minute='*'),
-    },
-}
-
-if __name__ == '__main__':
-    celery_app.start()
+# Auto-discover tasks
+celery_app.autodiscover_tasks(['app.tasks'])
