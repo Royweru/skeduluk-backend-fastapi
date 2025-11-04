@@ -24,44 +24,55 @@ class PostService:
     }
     ALLOWED_VIDEO_TYPES = {
         'video/mp4', 'video/quicktime', 'video/x-msvideo', 
-        'video/webm', 'video/mpeg', 'video/x-matroska'
+        'video/webm', 'video/mpeg', 'video/x-matroska', 'video/x-ms-wmv'
+    }
+    ALLOWED_AUDIO_TYPES = {
+        'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 
+        'audio/mp4', 'audio/x-m4a', 'audio/webm'
     }
     
     # Size limits (in bytes)
     MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
     MAX_VIDEO_SIZE = 100 * 1024 * 1024  # 100MB
+    MAX_AUDIO_SIZE = 25 * 1024 * 1024  # 25MB
     
     # Platform-specific limits
     PLATFORM_LIMITS = {
         'twitter': {
             'max_images': 4,
             'max_videos': 1,
-            'video_duration': 140  # seconds
+            'video_duration': 140,  # seconds
+            'max_video_size': 512 * 1024 * 1024  # 512MB
         },
         'facebook': {
             'max_images': 10,
             'max_videos': 1,
-            'video_duration': 240
+            'video_duration': 240,
+            'max_video_size': 4 * 1024 * 1024 * 1024  # 4GB
         },
         'instagram': {
             'max_images': 10,
             'max_videos': 1,
-            'video_duration': 60
+            'video_duration': 60,
+            'max_video_size': 100 * 1024 * 1024  # 100MB
         },
         'linkedin': {
             'max_images': 9,
             'max_videos': 1,
-            'video_duration': 600
+            'video_duration': 600,
+            'max_video_size': 5 * 1024 * 1024 * 1024  # 5GB
         },
         'tiktok': {
             'max_images': 0,
             'max_videos': 1,
-            'video_duration': 180
+            'video_duration': 180,
+            'max_video_size': 287.6 * 1024 * 1024  # 287.6MB
         },
         'youtube': {
             'max_images': 0,
             'max_videos': 1,
-            'video_duration': 3600
+            'video_duration': 3600,
+            'max_video_size': 128 * 1024 * 1024 * 1024  # 128GB
         }
     }
 
@@ -71,40 +82,47 @@ class PostService:
         post: schemas.PostCreate,
         user_id: int
     ) -> models.Post:
-        """Create a new post with support for platform-specific content and videos"""
+        """Create a new post with support for platform-specific content, images, and videos"""
         
-        # --- FIX #1: Convert dict to JSON string (from last time) ---
+        # Convert enhanced_content dict to JSON string
         enhanced_content_str = None
         if post.enhanced_content:
             enhanced_content_str = json.dumps(post.enhanced_content)
+        
+        # Convert platform_specific_content dict to JSON string
+        platform_specific_content_str = None
+        if post.platform_specific_content:
+            platform_specific_content_str = json.dumps(post.platform_specific_content)
 
-        # --- FIX #2: Convert lists to JSON strings (for THIS error) ---
+        # Convert lists to JSON strings for database storage
         image_urls_str = json.dumps(post.image_urls or [])
         video_urls_str = json.dumps(post.video_urls or [])
-        platforms_str = json.dumps(post.platforms) # This field is required
+        platforms_str = json.dumps(post.platforms)
         
         db_post = models.Post(
             user_id=user_id,
             original_content=post.original_content,
             enhanced_content=enhanced_content_str,
+            platform_specific_content=platform_specific_content_str,
             
-            # --- Use the new string versions ---
+            # Media URLs as JSON strings
             image_urls=image_urls_str,
             video_urls=video_urls_str,
             platforms=platforms_str,
             
-            # --- Other fields ---
-            platform_specific_content=post.platform_specific_content,
+            # Other fields
             audio_file_url=post.audio_file_url,
             scheduled_for=post.scheduled_for,
             status="scheduled" if post.scheduled_for else "draft",
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow() # Make sure to set this on create
+            updated_at=datetime.utcnow()
         )
+        
         db.add(db_post)
         await db.commit()
         await db.refresh(db_post)
         
+        # Increment user's post count
         await crud.UserCRUD.increment_post_count(db, user_id)
         
         return db_post
@@ -113,14 +131,15 @@ class PostService:
     async def validate_media_file(
         file: UploadFile,
         allowed_types: set,
-        max_size: int
+        max_size: int,
+        file_type_name: str = "file"
     ) -> bool:
         """Validate media file type and size"""
         # Check content type
         if file.content_type not in allowed_types:
             raise HTTPException(
                 status_code=400,
-                detail=f"File type {file.content_type} not allowed"
+                detail=f"{file_type_name} type '{file.content_type}' not allowed. Allowed types: {', '.join(allowed_types)}"
             )
         
         # Check file size
@@ -129,9 +148,11 @@ class PostService:
         file.file.seek(0)  # Reset to beginning
         
         if file_size > max_size:
+            max_size_mb = max_size / (1024 * 1024)
+            file_size_mb = file_size / (1024 * 1024)
             raise HTTPException(
                 status_code=400,
-                detail=f"File size {file_size} exceeds maximum {max_size}"
+                detail=f"{file_type_name} size {file_size_mb:.2f}MB exceeds maximum {max_size_mb:.2f}MB"
             )
         
         return True
@@ -144,12 +165,12 @@ class PostService:
     ) -> List[Dict[str, str]]:
         """
         Upload media files (images and videos) and return URLs with metadata
-        Returns: [{"url": "...", "type": "image|video", "filename": "..."}]
+        Returns: [{"url": "...", "type": "image|video", "filename": "...", "size": ...}]
         """
         media_data = []
         
         # Use local storage for development, S3 for production
-        use_s3 = settings.USE_S3_STORAGE if hasattr(settings, 'USE_S3_STORAGE') else False
+        use_s3 = getattr(settings, 'USE_S3_STORAGE', False)
         
         for file in files:
             # Determine file type
@@ -159,25 +180,38 @@ class PostService:
             if not (is_image or is_video):
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Unsupported file type: {file.content_type}"
+                    detail=f"Unsupported file type: {file.content_type}. Must be image or video."
                 )
+            
+            # Get file size before validation
+            file.file.seek(0, 2)
+            file_size = file.file.tell()
+            file.file.seek(0)
             
             # Validate file
             max_size = PostService.MAX_IMAGE_SIZE if is_image else PostService.MAX_VIDEO_SIZE
             allowed_types = PostService.ALLOWED_IMAGE_TYPES if is_image else PostService.ALLOWED_VIDEO_TYPES
-            await PostService.validate_media_file(file, allowed_types, max_size)
+            file_type_name = "Image" if is_image else "Video"
+            
+            await PostService.validate_media_file(file, allowed_types, max_size, file_type_name)
             
             # Validate against platform limits
             if platform:
-                limits = PostService.PLATFORM_LIMITS.get(platform, {})
+                limits = PostService.PLATFORM_LIMITS.get(platform.lower(), {})
                 if is_video and limits.get('max_videos', 1) == 0:
                     raise HTTPException(
                         status_code=400,
                         detail=f"{platform} does not support video uploads"
                     )
+                if is_video and file_size > limits.get('max_video_size', PostService.MAX_VIDEO_SIZE):
+                    max_mb = limits.get('max_video_size', PostService.MAX_VIDEO_SIZE) / (1024 * 1024)
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{platform} video size limit is {max_mb:.2f}MB"
+                    )
             
             # Generate unique filename
-            file_extension = os.path.splitext(file.filename)[1]
+            file_extension = os.path.splitext(file.filename)[1].lower()
             file_type = 'videos' if is_video else 'images'
             unique_filename = f"{user_id}/{file_type}/{uuid.uuid4()}{file_extension}"
             
@@ -199,7 +233,8 @@ class PostService:
                 "url": file_url,
                 "type": "video" if is_video else "image",
                 "filename": file.filename,
-                "content_type": file.content_type
+                "content_type": file.content_type,
+                "size": file_size
             })
         
         return media_data
@@ -219,12 +254,18 @@ class PostService:
                 region_name=settings.AWS_REGION
             )
             
+            # Reset file pointer
+            file.file.seek(0)
+            
             # Upload file
             s3_client.upload_fileobj(
                 file.file,
                 settings.AWS_BUCKET_NAME,
                 filename,
-                ExtraArgs={"ContentType": content_type}
+                ExtraArgs={
+                    "ContentType": content_type,
+                    "ACL": "public-read"  # Make files publicly accessible
+                }
             )
             
             # Generate public URL
@@ -246,6 +287,9 @@ class PostService:
             file_path = upload_dir / filename
             file_path.parent.mkdir(parents=True, exist_ok=True)
             
+            # Reset file pointer
+            file.file.seek(0)
+            
             # Save file
             async with aiofiles.open(file_path, 'wb') as out_file:
                 content = await file.read()
@@ -263,31 +307,63 @@ class PostService:
     
     @staticmethod
     async def upload_images(images: List[UploadFile], user_id: int) -> List[str]:
-        """Upload image files and return URLs (backward compatibility)"""
-        media_data = await PostService.upload_media(images, user_id)
+        """
+        Upload image files and return URLs (backward compatibility)
+        Returns list of image URLs
+        """
+        if not images:
+            return []
+        
+        # Filter to ensure only images
+        image_files = [f for f in images if f.content_type in PostService.ALLOWED_IMAGE_TYPES]
+        
+        if not image_files:
+            return []
+        
+        media_data = await PostService.upload_media(image_files, user_id)
         return [item["url"] for item in media_data if item["type"] == "image"]
     
     @staticmethod
     async def upload_videos(videos: List[UploadFile], user_id: int) -> List[str]:
-        """Upload video files and return URLs"""
-        media_data = await PostService.upload_media(videos, user_id)
+        """
+        Upload video files and return URLs
+        Returns list of video URLs
+        """
+        if not videos:
+            return []
+        
+        # Filter to ensure only videos
+        video_files = [f for f in videos if f.content_type in PostService.ALLOWED_VIDEO_TYPES]
+        
+        if not video_files:
+            return []
+        
+        media_data = await PostService.upload_media(video_files, user_id)
         return [item["url"] for item in media_data if item["type"] == "video"]
     
     @staticmethod
     async def upload_audio(audio: UploadFile, user_id: int) -> str:
         """Upload audio file and return URL"""
         # Validate audio file
-        if not audio.content_type.startswith('audio/'):
+        if audio.content_type not in PostService.ALLOWED_AUDIO_TYPES:
             raise HTTPException(
                 status_code=400,
-                detail="File must be an audio file"
+                detail=f"File must be an audio file. Allowed types: {', '.join(PostService.ALLOWED_AUDIO_TYPES)}"
             )
         
+        # Validate size
+        await PostService.validate_media_file(
+            audio, 
+            PostService.ALLOWED_AUDIO_TYPES, 
+            PostService.MAX_AUDIO_SIZE,
+            "Audio"
+        )
+        
         # Generate unique filename
-        file_extension = os.path.splitext(audio.filename)[1]
+        file_extension = os.path.splitext(audio.filename)[1].lower()
         unique_filename = f"{user_id}/audio/{uuid.uuid4()}{file_extension}"
         
-        use_s3 = settings.USE_S3_STORAGE if hasattr(settings, 'USE_S3_STORAGE') else False
+        use_s3 = getattr(settings, 'USE_S3_STORAGE', False)
         
         if use_s3:
             return await PostService._upload_to_s3(audio, unique_filename, audio.content_type)
@@ -297,7 +373,11 @@ class PostService:
     @staticmethod
     async def transcribe_audio(audio_file_url: str) -> Optional[str]:
         """Transcribe audio file to text"""
-        return await TranscriptionService.transcribe(audio_file_url)
+        try:
+            return await TranscriptionService.transcribe(audio_file_url)
+        except Exception as e:
+            print(f"Audio transcription error: {e}")
+            return None
     
     @staticmethod
     async def validate_platform_specific_content(
@@ -306,10 +386,12 @@ class PostService:
     ) -> bool:
         """Validate platform-specific content structure"""
         for platform in platforms:
-            if platform not in content:
+            platform_lower = platform.lower()
+            
+            if platform_lower not in content:
                 continue
             
-            platform_content = content[platform]
+            platform_content = content[platform_lower]
             
             # Validate required fields
             if 'text' not in platform_content:
@@ -320,7 +402,7 @@ class PostService:
             
             # Validate media count
             media = platform_content.get('media', [])
-            limits = PostService.PLATFORM_LIMITS.get(platform, {})
+            limits = PostService.PLATFORM_LIMITS.get(platform_lower, {})
             
             images = [m for m in media if m.get('type') == 'image']
             videos = [m for m in media if m.get('type') == 'video']
@@ -339,6 +421,14 @@ class PostService:
                     status_code=400,
                     detail=f"{platform} allows maximum {max_videos} video, got {len(videos)}"
                 )
+            
+            # Validate no mixing of images and videos for platforms that don't support it
+            if videos and images:
+                if platform_lower in ['twitter', 'instagram']:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{platform} does not support mixing images and videos in the same post"
+                    )
         
         return True
     
@@ -350,10 +440,14 @@ class PostService:
         end_date: str
     ) -> List[Dict[str, Any]]:
         """Get posts for calendar view"""
-        from datetime import datetime
-        
-        start = datetime.fromisoformat(start_date)
-        end = datetime.fromisoformat(end_date)
+        try:
+            start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)"
+            )
         
         posts = await db.execute(
             select(models.Post).where(
@@ -367,17 +461,32 @@ class PostService:
         
         events = []
         for post in posts.scalars().all():
+            # Parse platforms from JSON string
+            platforms = json.loads(post.platforms) if isinstance(post.platforms, str) else post.platforms
+            
+            # Parse video_urls to check for videos
+            video_urls = []
+            if post.video_urls:
+                video_urls = json.loads(post.video_urls) if isinstance(post.video_urls, str) else post.video_urls
+            
+            # Check for videos in platform_specific_content
+            has_video = bool(video_urls)
+            if not has_video and post.platform_specific_content:
+                psc = json.loads(post.platform_specific_content) if isinstance(post.platform_specific_content, str) else post.platform_specific_content
+                has_video = any(
+                    any(m.get('type') == 'video' for m in pc.get('media', []))
+                    for pc in psc.values()
+                ) if psc else False
+            
             events.append({
                 "id": post.id,
                 "title": post.original_content[:50] + "..." if len(post.original_content) > 50 else post.original_content,
                 "start": post.scheduled_for.isoformat() if post.scheduled_for else post.created_at.isoformat(),
                 "end": post.scheduled_for.isoformat() if post.scheduled_for else post.created_at.isoformat(),
-                "platforms": post.platforms,
+                "platforms": platforms,
                 "status": post.status,
-                "has_video": bool(post.platform_specific_content and any(
-                    any(m.get('type') == 'video' for m in pc.get('media', []))
-                    for pc in post.platform_specific_content.values()
-                ))
+                "has_video": has_video,
+                "has_audio": bool(post.audio_file_url)
             })
         
         return events
@@ -391,20 +500,91 @@ class PostService:
         
         total_images = 0
         total_videos = 0
-        total_size = 0
+        total_audio = 0
         
         for post in posts.scalars().all():
+            # Count images
+            if post.image_urls:
+                image_urls = json.loads(post.image_urls) if isinstance(post.image_urls, str) else post.image_urls
+                total_images += len(image_urls) if image_urls else 0
+            
+            # Count videos
+            if post.video_urls:
+                video_urls = json.loads(post.video_urls) if isinstance(post.video_urls, str) else post.video_urls
+                total_videos += len(video_urls) if video_urls else 0
+            
+            # Count audio
+            if post.audio_file_url:
+                total_audio += 1
+            
+            # Count media from platform_specific_content
             if post.platform_specific_content:
-                for platform_content in post.platform_specific_content.values():
-                    media = platform_content.get('media', [])
-                    for item in media:
-                        if item.get('type') == 'image':
-                            total_images += 1
-                        elif item.get('type') == 'video':
-                            total_videos += 1
+                psc = json.loads(post.platform_specific_content) if isinstance(post.platform_specific_content, str) else post.platform_specific_content
+                if psc:
+                    for platform_content in psc.values():
+                        media = platform_content.get('media', [])
+                        for item in media:
+                            if item.get('type') == 'image':
+                                total_images += 1
+                            elif item.get('type') == 'video':
+                                total_videos += 1
         
         return {
             "total_images": total_images,
             "total_videos": total_videos,
-            "total_media": total_images + total_videos
+            "total_audio": total_audio,
+            "total_media": total_images + total_videos + total_audio
+        }
+    
+    @staticmethod
+    async def delete_media_file(file_url: str) -> bool:
+        """Delete a media file from storage"""
+        try:
+            use_s3 = getattr(settings, 'USE_S3_STORAGE', False)
+            
+            if use_s3:
+                # Extract filename from S3 URL
+                filename = file_url.split(f"{settings.AWS_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/")[1]
+                
+                s3_client = boto3.client(
+                    "s3",
+                    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                    region_name=settings.AWS_REGION
+                )
+                
+                s3_client.delete_object(
+                    Bucket=settings.AWS_BUCKET_NAME,
+                    Key=filename
+                )
+            else:
+                # Extract filename from local URL
+                filename = file_url.split('/uploads/')[1]
+                file_path = Path(settings.UPLOAD_DIR) / filename
+                
+                if file_path.exists():
+                    file_path.unlink()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error deleting media file: {e}")
+            return False
+    
+    @staticmethod
+    def get_platform_media_requirements(platform: str) -> Dict[str, Any]:
+        """Get media requirements for a specific platform"""
+        platform_lower = platform.lower()
+        limits = PostService.PLATFORM_LIMITS.get(platform_lower, {})
+        
+        return {
+            "platform": platform,
+            "max_images": limits.get('max_images', 0),
+            "max_videos": limits.get('max_videos', 0),
+            "max_video_duration": limits.get('video_duration', 0),
+            "max_video_size_mb": limits.get('max_video_size', 0) / (1024 * 1024),
+            "supports_images": limits.get('max_images', 0) > 0,
+            "supports_videos": limits.get('max_videos', 0) > 0,
+            "allowed_image_types": list(PostService.ALLOWED_IMAGE_TYPES),
+            "allowed_video_types": list(PostService.ALLOWED_VIDEO_TYPES)
         }

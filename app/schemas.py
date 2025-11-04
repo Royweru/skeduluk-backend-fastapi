@@ -58,6 +58,7 @@ class SocialConnectionResponse(SocialConnectionBase):
 
 
 
+#Post schemas
 class PostBase(BaseModel):
     original_content: str
     platforms: List[str]
@@ -70,13 +71,13 @@ class PostBase(BaseModel):
             try:
                 return json.loads(v)
             except json.JSONDecodeError:
-                return [] # Or raise error
+                return []  # Or raise error
         return v
     
 class PostCreate(PostBase):
     enhanced_content: Optional[Dict[str, str]] = None
     image_urls: Optional[List[str]] = None
-    video_urls: Optional[List[str]] = None
+    video_urls: Optional[List[str]] = None  # Added video support
     platform_specific_content: Optional[Dict[str, str]] = None
     audio_file_url: Optional[str] = None
 
@@ -85,7 +86,8 @@ class PostUpdate(BaseModel):
     platforms: Optional[List[str]] = None
     scheduled_for: Optional[datetime] = None
     enhanced_content: Optional[Dict[str, str]] = None
-
+    image_urls: Optional[List[str]] = None
+    video_urls: Optional[List[str]] = None  # Added video support
 
 
 class PostResponse(PostBase):
@@ -93,14 +95,13 @@ class PostResponse(PostBase):
     user_id: int
     enhanced_content: Optional[Dict[str, str]] = None
     image_urls: Optional[List[str]] = None
-    video_urls: Optional[List[str]] = None
+    video_urls: Optional[List[str]] = None  # Added video support
     audio_file_url: Optional[str] = None
     status: str
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     
-    # --- ADD THIS VALIDATOR ---
     @field_validator('image_urls', 'video_urls', 'enhanced_content', mode='before')
     @classmethod
     def parse_json_fields(cls, v):
@@ -110,18 +111,24 @@ class PostResponse(PostBase):
             try:
                 return json.loads(v)
             except json.JSONDecodeError:
-                # Default to empty/none for the type
-                return [] if isinstance(v, list) else None
+                # Default to empty list for arrays, None for objects
+                return [] if 'urls' in str(cls) else None
         return v
 
     class Config:
         from_attributes = True
 
-# --- ADD THIS NEW SCHEMA ---
-# This schema will correctly model your API's actual response
+
+# Response schema for post creation endpoint
 class PostCreateResponse(PostResponse):
-    _message: Optional[str] = None
-    _task_id: Optional[str] = None
+    _message: Optional[str] = Field(None, exclude=True)  # Optional metadata
+    _task_id: Optional[str] = Field(None, exclude=True)  # Optional task ID
+
+    class Config:
+        from_attributes = True
+        # Allow extra fields for metadata
+        extra = 'allow'
+
 
 class PostResultBase(BaseModel):
     platform: str

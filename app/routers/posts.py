@@ -21,7 +21,7 @@ async def create_post(
     scheduled_for: Optional[str] = Form(None),
     enhanced_content: Optional[str] = Form(None),
     images: Optional[List[UploadFile]] = File(None),
-    videos:Optional[List[UploadFile]]  =File(None),
+    videos: Optional[List[UploadFile]] = File(None),
     audio: Optional[UploadFile] = File(None),
     current_user: models.User = Depends(auth.get_current_active_user),
     db: AsyncSession = Depends(get_async_db)
@@ -38,17 +38,31 @@ async def create_post(
                 detail="At least one platform must be selected"
             )
         
-        # Handle file uploads
+        # Handle image uploads
         image_urls = []
         if images:
             try:
                 image_urls = await PostService.upload_images(images, current_user.id)
+                print(f"Uploaded {len(image_urls)} images")
             except Exception as e:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Failed to upload images: {str(e)}"
                 )
         
+        # Handle video uploads
+        video_urls = []
+        if videos:
+            try:
+                video_urls = await PostService.upload_videos(videos, current_user.id)
+                print(f"Uploaded {len(video_urls)} videos")
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to upload videos: {str(e)}"
+                )
+        
+        # Handle audio upload
         audio_file_url = None
         if audio:
             try:
@@ -57,6 +71,7 @@ async def create_post(
                 transcription = await PostService.transcribe_audio(audio_file_url)
                 if transcription:
                     original_content = f"{original_content}\n\n[Audio transcription]: {transcription}"
+                print(f"Uploaded and transcribed audio")
             except Exception as e:
                 print(f"Audio processing error: {e}")
                 # Continue without audio if it fails
@@ -78,6 +93,7 @@ async def create_post(
             scheduled_for=scheduled_datetime,
             enhanced_content=enhanced_content_dict,
             image_urls=image_urls,
+            video_urls=video_urls,  # Add video URLs
             audio_file_url=audio_file_url
         )
         
@@ -113,7 +129,6 @@ async def create_post(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create post: {str(e)}"
         )
-
 
 @router.get("/{post_id}/status")
 async def get_post_status(
