@@ -121,13 +121,8 @@ class PostResponse(PostBase):
 
 # Response schema for post creation endpoint
 class PostCreateResponse(PostResponse):
-    _message: Optional[str] = Field(None, exclude=True)  # Optional metadata
-    _task_id: Optional[str] = Field(None, exclude=True)  # Optional task ID
-
-    # class Config:
-    #     from_attributes = True
-    #     # Allow extra fields for metadata
-    #     extra = 'allow'
+    message: Optional[str] = Field(None, exclude=True)
+    task_id: Optional[str] = Field(None, exclude=True)
 
 
 class PostResultBase(BaseModel):

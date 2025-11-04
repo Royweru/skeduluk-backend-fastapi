@@ -109,13 +109,13 @@ async def create_post(
             
             # Return success with helpful message
             response_data = post.dict()
-            response_data["_message"] = f"Post is being published to {len(platforms_list)} platform(s). This may take a few moments."
-            response_data["_task_id"] = task.id
+            response_data["message"] = f"Post is being published to {len(platforms_list)} platform(s). This may take a few moments."
+            response_data["task_id"] = task.id
             return response_data
         else:
             # Scheduled post
             response_data = post.dict()
-            response_data["_message"] = f"Post scheduled for {scheduled_datetime.strftime('%B %d, %Y at %I:%M %p')}"
+            response_data["message"] = f"Post scheduled for {scheduled_datetime.strftime('%B %d, %Y at %I:%M %p')}"
             return response_data
     
     except HTTPException:
