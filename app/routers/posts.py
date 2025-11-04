@@ -4,7 +4,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from datetime import datetime
 import json
-
 from app import models, schemas, auth
 from app.database import get_async_db
 from app.crud import PostCRUD
