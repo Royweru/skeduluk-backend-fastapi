@@ -24,7 +24,8 @@ def upgrade() -> None:
     op.alter_column('posts', 'enhanced_content',
                existing_type=sa.TEXT(),
                type_=postgresql.JSONB(astext_type=sa.Text()),
-               existing_nullable=True)
+               existing_nullable=True,
+               postgresql_using='CASE WHEN enhanced_content IS NULL OR enhanced_content = \'\' THEN NULL ELSE enhanced_content::jsonb END')
     # ### end Alembic commands ###
 
 
@@ -34,5 +35,6 @@ def downgrade() -> None:
     op.alter_column('posts', 'enhanced_content',
                existing_type=postgresql.JSONB(astext_type=sa.Text()),
                type_=sa.TEXT(),
-               existing_nullable=True)
+               existing_nullable=True,
+               postgresql_using='enhanced_content::text')
     # ### end Alembic commands ###
