@@ -83,24 +83,35 @@ class PostResponse(PostBase):
     user_id: int
     enhanced_content: Optional[Dict[str, str]] = None
     image_urls: Optional[List[str]] = None
-    video_urls: Optional[List[str]] = None  # Added video support
+    video_urls: Optional[List[str]] = None
     audio_file_url: Optional[str] = None
     status: str
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     
-    @field_validator('image_urls', 'video_urls', 'enhanced_content', mode='before')
+    @field_validator('platforms', 'image_urls', 'video_urls', mode='before')
     @classmethod
-    def parse_json_fields(cls, v):
+    def parse_json_list_fields(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return []
+        return v
+    
+    @field_validator('enhanced_content', mode='before')
+    @classmethod
+    def parse_json_dict_fields(cls, v):
         if v is None:
             return None
         if isinstance(v, str):
             try:
                 return json.loads(v)
             except json.JSONDecodeError:
-                # Default to empty list for arrays, None for objects
-                return [] if 'urls' in str(cls) else None
+                return None
         return v
 
     class Config:
