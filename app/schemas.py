@@ -63,24 +63,7 @@ class PostBase(BaseModel):
     original_content: str
     platforms: List[str]
     scheduled_for: Optional[datetime] = None
-
-    @field_validator('platforms', mode='before')
-    @classmethod
-    def parse_platforms(cls, v):
-        if isinstance(v, str):
-            try:
-                return json.loads(v)
-            except json.JSONDecodeError:
-                return []  # Or raise error
-        return v
-    
-class PostCreate(PostBase):
-    enhanced_content: Optional[Dict[str, str]] = None
-    image_urls: Optional[List[str]] = None
-    video_urls: Optional[List[str]] = None  # Added video support
-    platform_specific_content: Optional[Dict[str, str]] = None
-    audio_file_url: Optional[str] = None
-
+ 
 class PostUpdate(BaseModel):
     original_content: Optional[str] = None
     platforms: Optional[List[str]] = None
@@ -88,7 +71,11 @@ class PostUpdate(BaseModel):
     enhanced_content: Optional[Dict[str, str]] = None
     image_urls: Optional[List[str]] = None
     video_urls: Optional[List[str]] = None  # Added video support
-
+class PostCreate(PostBase) :
+    enhanced_content: Optional[Dict[str, str]] = None
+    image_urls: Optional[List[str]] = None
+    video_urls: Optional[List[str]] = None 
+    audio_file_url:Optional[str] = None 
 
 class PostResponse(PostBase):
     id: int

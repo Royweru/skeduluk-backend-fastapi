@@ -92,11 +92,29 @@ async def create_post(
             scheduled_for=scheduled_datetime,
             enhanced_content=enhanced_content_dict,
             image_urls=image_urls,
-            video_urls=video_urls,  # Add video URLs
+            video_urls=video_urls,
             audio_file_url=audio_file_url
         )
         
         post = await PostService.create_post(db, post_data, current_user.id)
+        
+        # Convert Post model to dict using model_dump() for Pydantic v2
+        # First, convert to PostResponse schema
+        post_response = schemas.PostResponse(
+            id=post.id,
+            user_id=post.user_id,
+            original_content=post.original_content,
+            platforms=json.loads(post.platforms) if isinstance(post.platforms, str) else post.platforms,
+            scheduled_for=post.scheduled_for,
+            enhanced_content=json.loads(post.enhanced_content) if post.enhanced_content and isinstance(post.enhanced_content, str) else post.enhanced_content,
+            image_urls=json.loads(post.image_urls) if post.image_urls and isinstance(post.image_urls, str) else post.image_urls or [],
+            video_urls=json.loads(post.video_urls) if post.video_urls and isinstance(post.video_urls, str) else post.video_urls or [],
+            audio_file_url=post.audio_file_url,
+            status=post.status,
+            error_message=post.error_message,
+            created_at=post.created_at,
+            updated_at=post.updated_at
+        )
         
         # If no schedule, publish immediately
         if not scheduled_for:
@@ -107,16 +125,19 @@ async def create_post(
             
             print(f"Post {post.id} queued for immediate publishing. Task ID: {task.id}")
             
-            # Return success with helpful message
-            response_data = post.dict()
+            # Use model_dump() instead of dict() for Pydantic v2
+            response_data = post_response.model_dump()
             response_data["message"] = f"Post is being published to {len(platforms_list)} platform(s). This may take a few moments."
             response_data["task_id"] = task.id
-            return response_data
+            
+            # Return as PostCreateResponse
+            return schemas.PostCreateResponse(**response_data)
         else:
-            # Scheduled post
-            response_data = post.dict()
+            # Scheduled post - use model_dump() instead of dict()
+            response_data = post_response.model_dump()
             response_data["message"] = f"Post scheduled for {scheduled_datetime.strftime('%B %d, %Y at %I:%M %p')}"
-            return response_data
+            
+            return schemas.PostCreateResponse(**response_data)
     
     except HTTPException:
         raise
