@@ -18,7 +18,8 @@ async def create_post(
     original_content: str = Form(...),
     platforms: str = Form(...),
     scheduled_for: Optional[str] = Form(None),
-    enhanced_content: Optional[str] = Form(None),
+    enhanced_content: Optional[dict] = Form(None),
+    platform_specific_content: Optional[dict] = Form(None),
     images: Optional[List[UploadFile]] = File(None),
     videos: Optional[List[UploadFile]] = File(None),
     audio: Optional[UploadFile] = File(None),
@@ -29,7 +30,7 @@ async def create_post(
         # Parse JSON strings
         platforms_list = json.loads(platforms)
         enhanced_content_dict = json.loads(enhanced_content) if enhanced_content else None
-        
+        platform_specific_content_dict = json.loads(platform_specific_content) if platform_specific_content else None
         # Validate platforms
         if not platforms_list or len(platforms_list) == 0:
             raise HTTPException(

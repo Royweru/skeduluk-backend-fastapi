@@ -68,7 +68,7 @@ class Post(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     original_content = Column(Text, nullable=False)
-    enhanced_content = Column(Text, nullable=True)
+    enhanced_content = Column(JSONB, nullable=True)
     image_urls = Column(Text, nullable=True)
     video_urls = Column(Text, nullable=True)
     platform_specific_content = Column(JSONB, nullable=True)

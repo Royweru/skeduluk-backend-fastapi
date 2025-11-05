@@ -73,9 +73,10 @@ class PostUpdate(BaseModel):
     video_urls: Optional[List[str]] = None  # Added video support
 class PostCreate(PostBase) :
     enhanced_content: Optional[Dict[str, str]] = None
+    platform_specific_content: Optional[Dict[str, str]] = None
     image_urls: Optional[List[str]] = None
     video_urls: Optional[List[str]] = None 
-    audio_file_url:Optional[str] = None 
+    audio_file_url:Optional[str] 
 
 class PostResponse(PostBase):
     id: int
