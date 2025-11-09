@@ -1,7 +1,6 @@
 import secrets
 import hashlib
 import base64
-import redis
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
@@ -9,40 +8,10 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException
+from jose import jwt, JWTError
+
 from ..config import settings
 from app import models
-
-# --- Upstash Redis Connection with SSL ---
-try:
-    REDIS_URL = settings.CELERY_BROKER_URL
-    
-    if REDIS_URL.startswith("redis://") and "upstash.io" in REDIS_URL:
-        REDIS_URL = REDIS_URL.replace("redis://", "rediss://")
-        print(f"⚠️  Converted Redis URL to use SSL (rediss://)")
-    
-    print(f"🔍 Connecting to Upstash Redis...")
-    
-    # Connect with SSL support
-    redis_client = redis.from_url(
-        REDIS_URL,
-        db=0,  
-        decode_responses=True,
-        ssl_cert_reqs=None,  # Disable SSL certificate verification for Upstash
-        socket_connect_timeout=10,
-        socket_timeout=10
-    )
-    
-    # Test connection
-    redis_client.ping()
-    print("✅ Connected to Upstash Redis for OAuth state.")
-    
-except redis.exceptions.ConnectionError as e:
-    print(f"❌ CRITICAL: Could not connect to Upstash Redis. {e}")
-    print("💡 Make sure CELERY_BROKER_URL uses 'rediss://' (with SSL)")
-    redis_client = None
-except Exception as e:
-    print(f"❌ Unexpected Redis error: {e}")
-    redis_client = None
 
 # --- OAuth Configuration ---
 BASE_URL = settings.BACKEND_URL.rstrip("/")
@@ -59,7 +28,7 @@ OAUTH_CONFIGS = {
         "scope": "tweet.read tweet.write users.read offline.access",
         "user_info_url": "https://api.twitter.com/2/users/me",
         "uses_pkce": True,
-        "token_auth_method": "basic",  # Twitter uses Basic Auth for token exchange
+        "token_auth_method": "basic",
         "response_type": "code"
     },
     "facebook": {
@@ -75,7 +44,6 @@ OAUTH_CONFIGS = {
         "response_type": "code"
     },
     "instagram": {
-        # Instagram uses Facebook OAuth
         "client_id": settings.FACEBOOK_APP_ID,
         "client_secret": settings.FACEBOOK_APP_SECRET,
         "auth_url": "https://www.facebook.com/v19.0/dialog/oauth",
@@ -129,7 +97,6 @@ OAUTH_CONFIGS = {
         }
     },
     "youtube": {
-        # YouTube uses Google OAuth
         "client_id": settings.GOOGLE_CLIENT_ID,
         "client_secret": settings.GOOGLE_CLIENT_SECRET,
         "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
@@ -150,171 +117,92 @@ OAUTH_CONFIGS = {
 
 
 class OAuthService:
-    """OAuth Service with Upstash Redis for PKCE state management"""
-    
-    @staticmethod
-    def _check_redis():
-        """Check if Redis connection is available"""
-        if not redis_client:
-            raise HTTPException(
-                status_code=503,
-                detail="OAuth service unavailable. Redis connection failed. Check CELERY_BROKER_URL and ensure it uses 'rediss://' for SSL."
-            )
+    """OAuth Service with JWT-based state for PKCE management"""
 
     @staticmethod
     def _generate_code_verifier() -> str:
-        """Generate a cryptographically random code verifier (43-128 chars)"""
-        # Generate 32 random bytes = 43 chars in base64url
         return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
 
     @staticmethod
     def _generate_code_challenge(verifier: str) -> str:
-        """Generate code challenge from verifier using S256 method"""
         digest = hashlib.sha256(verifier.encode('utf-8')).digest()
         return base64.urlsafe_b64encode(digest).decode('utf-8').rstrip('=')
 
     @classmethod
     async def initiate_oauth(cls, user_id: int, platform: str) -> str:
-        """
-        Initiate OAuth flow with PKCE and Redis state.
-        Returns the authorization URL to redirect user to.
-        """
-        cls._check_redis()
         platform = platform.lower()
-
         if platform not in OAUTH_CONFIGS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported platform: {platform}. Supported: {', '.join(OAUTH_CONFIGS.keys())}"
-            )
+            raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
 
         config = OAUTH_CONFIGS[platform]
-        
-        # Check if platform is configured
-        if not config.get("client_id") or not config.get("client_secret"):
-            raise HTTPException(
-                status_code=500,
-                detail=f"OAuth for {platform} is not configured. Missing CLIENT_ID or CLIENT_SECRET in environment variables."
-            )
-        
-        if not config.get("redirect_uri"):
-            raise HTTPException(
-                status_code=500,
-                detail=f"OAuth for {platform} is not configured. Missing REDIRECT_URI."
-            )
+        if not all([config.get("client_id"), config.get("client_secret"), config.get("redirect_uri")]):
+            raise HTTPException(status_code=500, detail=f"OAuth for {platform} is not configured.")
 
-        # Generate state token for CSRF protection
-        state = secrets.token_urlsafe(32)
-        state_with_user = f"{user_id}:{state}"
+        # --- State and PKCE Handling ---
+        state_payload = {
+            "user_id": user_id,
+            "platform": platform,
+            "exp": datetime.utcnow() + timedelta(minutes=10)
+        }
         
-        # Base OAuth parameters
         params = {
             "response_type": config.get("response_type", "code"),
             "client_id": config["client_id"],
             "redirect_uri": config["redirect_uri"],
-            "state": state_with_user,
         }
         
-        # Add scope if present
         if config.get("scope"):
             params["scope"] = config["scope"]
         
-        # Add any platform-specific auth params
         params.update(config.get("auth_params", {}))
 
-        # Handle PKCE for platforms that support it
         if config.get("uses_pkce", False):
             code_verifier = cls._generate_code_verifier()
             code_challenge = cls._generate_code_challenge(code_verifier)
-            
             params.update({
                 "code_challenge": code_challenge,
                 "code_challenge_method": "S256"
             })
-            
-            # Store verifier in Redis with 10-minute TTL
-            try:
-                redis_client.setex(
-                    f"pkce:{state_with_user}",
-                    600,  # 10 minutes
-                    code_verifier
-                )
-                print(f"✅ Stored PKCE verifier in Redis for state: {state_with_user[:20]}...")
-            except Exception as e:
-                print(f"❌ Failed to store PKCE verifier in Redis: {e}")
-                raise HTTPException(
-                    status_code=503,
-                    detail="Failed to store OAuth state. Please try again."
-                )
+            state_payload["pkce_verifier"] = code_verifier
         
-        # Store state in Redis even for non-PKCE flows (for CSRF protection)
-        try:
-            redis_client.setex(
-                f"oauth_state:{state_with_user}",
-                600,  # 10 minutes
-                platform
-            )
-            print(f"✅ Stored OAuth state in Redis for {platform}")
-        except Exception as e:
-            print(f"❌ Failed to store OAuth state: {e}")
+        # Encode the state payload into a JWT
+        state_jwt = jwt.encode(state_payload, settings.SECRET_KEY, algorithm="HS256")
+        params["state"] = state_jwt
 
-        # Build authorization URL
         query_string = urlencode(params)
         auth_url = f"{config['auth_url']}?{query_string}"
-        
         print(f"🔗 Generated OAuth URL for {platform}: {auth_url[:100]}...")
-        
         return auth_url
 
     @classmethod
     async def handle_oauth_callback(
-        cls,
-        platform: str,
-        code: str,
-        state: str,
-        db: AsyncSession,
-        error: Optional[str] = None
+        cls, platform: str, code: str, state: str, db: AsyncSession, error: Optional[str] = None
     ) -> Dict:
-        """
-        Handle OAuth callback and exchange code for access token.
-        Uses Redis to retrieve PKCE verifier and validate state.
-        """
-        cls._check_redis()
-        platform = platform.lower()
-
-        # Check for OAuth errors
         if error:
-            print(f"OAuth error from {platform}: {error}")
-            return {
-                "success": False,
-                "error": f"Authorization denied: {error}"
-            }
+            return {"success": False, "error": f"Authorization denied: {error}"}
 
+        platform = platform.lower()
         if platform not in OAUTH_CONFIGS:
             return {"success": False, "error": f"Unsupported platform: {platform}"}
 
         config = OAUTH_CONFIGS[platform]
 
-        # Extract and validate user_id from state
+        # --- Decode and Validate State JWT ---
         try:
-            user_id = int(state.split(":")[0])
-        except (ValueError, IndexError, TypeError):
-            return {"success": False, "error": "Invalid state parameter. Please try connecting again."}
+            state_payload = jwt.decode(state, settings.SECRET_KEY, algorithms=["HS256"])
+            
+            if state_payload.get("platform") != platform:
+                raise JWTError("Platform mismatch in state token")
+            
+            user_id = state_payload["user_id"]
+            code_verifier = state_payload.get("pkce_verifier")
 
-        # Verify state exists in Redis (CSRF protection)
-        try:
-            stored_platform = redis_client.get(f"oauth_state:{state}")
-            if not stored_platform:
-                print(f"⚠️ State not found in Redis for {platform}")
-                # Continue anyway, but log the warning
-            else:
-                redis_client.delete(f"oauth_state:{state}")
-                print(f"✅ Validated and deleted OAuth state for {platform}")
-        except Exception as e:
-            print(f"⚠️ Redis error validating state: {e}")
+        except JWTError as e:
+            print(f"❌ Invalid state token: {e}")
+            return {"success": False, "error": "Invalid or expired connection link. Please try again."}
 
         try:
-            # Prepare token exchange parameters
+            # --- Token Exchange ---
             token_params = {
                 "grant_type": "authorization_code",
                 "code": code,
@@ -322,132 +210,62 @@ class OAuthService:
                 "client_id": config["client_id"],
             }
             
-            # Handle PKCE if used
             if config.get("uses_pkce", False):
-                try:
-                    code_verifier = redis_client.get(f"pkce:{state}")
-                    
-                    if not code_verifier:
-                        print(f"⚠️ PKCE verifier not found for {platform}, attempting without it")
-                        # Some platforms might still work without it
-                    else:
-                        token_params["code_verifier"] = code_verifier
-                        redis_client.delete(f"pkce:{state}")
-                        print(f"✅ Retrieved and deleted PKCE verifier from Redis for {platform}")
-                    
-                except Exception as e:
-                    print(f"❌ Redis error retrieving PKCE verifier: {e}")
-                    return {
-                        "success": False,
-                        "error": "Failed to retrieve OAuth state. Please try connecting again."
-                    }
+                if not code_verifier:
+                    return {"success": False, "error": "PKCE verifier missing from state."}
+                token_params["code_verifier"] = code_verifier
 
-            # Set up authentication based on platform requirements
-            headers = {
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "application/json"
-            }
+            headers = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"}
             auth = None
 
             if config.get("token_auth_method") == "basic":
-                # Basic Auth (Twitter/X)
                 auth = (config["client_id"], config["client_secret"])
-                print(f"🔐 Using Basic Auth for {platform}")
             else:
-                # Body Auth (most other platforms)
                 token_params["client_secret"] = config["client_secret"]
-                print(f"🔐 Using Body Auth for {platform}")
 
-            # Exchange code for token
-            print(f"🔄 Exchanging code for token at {config['token_url']}")
-            
             async with httpx.AsyncClient(timeout=30.0) as client:
                 token_response = await client.post(
-                    config["token_url"],
-                    data=token_params,
-                    headers=headers,
-                    auth=auth
+                    config["token_url"], data=token_params, headers=headers, auth=auth
                 )
 
                 if token_response.status_code != 200:
-                    error_text = token_response.text
-                    print(f"❌ Token exchange failed for {platform}: {token_response.status_code}")
-                    print(f"Response: {error_text}")
-                    
-                    return {
-                        "success": False,
-                        "error": f"Token exchange failed: {token_response.status_code}. Please try again."
-                    }
+                    print(f"❌ Token exchange failed for {platform}: {token_response.status_code} {token_response.text}")
+                    return {"success": False, "error": f"Token exchange failed: {token_response.status_code}"}
                 
                 token_data = token_response.json()
                 access_token = token_data.get("access_token")
-                refresh_token = token_data.get("refresh_token")
-                expires_in = token_data.get("expires_in")
-                
                 if not access_token:
-                    print(f"❌ No access token in response for {platform}")
-                    print(f"Response data: {token_data}")
                     return {"success": False, "error": "No access token received from platform"}
-                
-                print(f"✅ Successfully received access token for {platform}")
-                
-                # Get user profile from platform
-                user_info = await cls._get_platform_user_info(
-                    platform, access_token, config["user_info_url"]
-                )
-                
+
+                # --- Get User Info & Save Connection ---
+                user_info = await cls._get_platform_user_info(platform, access_token, config["user_info_url"])
                 if not user_info:
-                    return {
-                        "success": False,
-                        "error": f"Failed to get user profile from {platform}. Please try again."
-                    }
-                
-                print(f"✅ Retrieved user info from {platform}: {user_info.get('username')}")
-                
-                # Save connection to database
+                    return {"success": False, "error": f"Failed to get user profile from {platform}."}
+
                 connection = await cls._save_connection(
-                    db=db,
-                    user_id=user_id,
-                    platform=platform,
+                    db=db, user_id=user_id, platform=platform,
                     access_token=access_token,
-                    refresh_token=refresh_token,
-                    expires_in=expires_in,
+                    refresh_token=token_data.get("refresh_token"),
+                    expires_in=token_data.get("expires_in"),
                     platform_user_id=user_info.get("user_id"),
                     platform_username=user_info.get("username"),
                     platform_name=user_info.get("name"),
                     platform_email=user_info.get("email")
                 )
                 
-                print(f"✅ Saved connection to database for {platform}")
-                
                 return {
-                    "success": True,
-                    "connection_id": connection.id,
-                    "platform": platform,
+                    "success": True, "platform": platform,
                     "username": user_info.get("username") or user_info.get("name"),
-                    "platform_user_id": user_info.get("user_id")
                 }
                 
         except httpx.TimeoutException:
-            print(f"⏱️ Timeout connecting to {platform}")
-            return {
-                "success": False,
-                "error": f"Connection timeout. {platform} might be experiencing issues. Please try again."
-            }
+            return {"success": False, "error": f"Connection timeout with {platform}. Please try again."}
         except httpx.HTTPError as e:
-            print(f"❌ HTTP error for {platform}: {str(e)}")
-            return {
-                "success": False,
-                "error": f"Network error connecting to {platform}. Please try again."
-            }
+            return {"success": False, "error": f"Network error connecting to {platform}. Please try again."}
         except Exception as e:
-            print(f"❌ OAuth callback error for {platform}: {str(e)}")
             import traceback
             traceback.print_exc()
-            return {
-                "success": False,
-                "error": f"An unexpected error occurred. Please try again."
-            }
+            return {"success": False, "error": "An unexpected error occurred."}
 
     @classmethod
     async def refresh_access_token(
@@ -549,163 +367,85 @@ class OAuthService:
         try:
             headers = {"Authorization": f"Bearer {access_token}"}
             
-            # TikTok requires different header format
             if platform == "tiktok":
-                headers = {
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json"
-                }
-            
-            print(f"📥 Fetching user info from {platform} at {user_info_url}")
+                headers["Content-Type"] = "application/json"
             
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    user_info_url,
-                    headers=headers
-                )
+                response = await client.get(user_info_url, headers=headers)
                 
                 if response.status_code != 200:
-                    print(f"❌ {platform} user info API error: {response.status_code}")
-                    print(f"Response: {response.text}")
+                    print(f"❌ {platform} user info API error: {response.status_code} {response.text}")
                     return None
 
                 data = response.json()
                 
-                # Parse response based on platform
                 if platform == "twitter":
                     user_data = data.get("data", {})
-                    return {
-                        "user_id": user_data.get("id"),
-                        "username": user_data.get("username"),
-                        "name": user_data.get("name"),
-                        "email": None
-                    }
-                
+                    return {"user_id": user_data.get("id"), "username": user_data.get("username"), "name": user_data.get("name")}
                 elif platform in ["facebook", "instagram"]:
-                    return {
-                        "user_id": data.get("id"),
-                        "username": data.get("name"),
-                        "name": data.get("name"),
-                        "email": data.get("email")
-                    }
-                
+                    return {"user_id": data.get("id"), "username": data.get("name"), "name": data.get("name"), "email": data.get("email")}
                 elif platform == "linkedin":
-                    return {
-                        "user_id": data.get("sub"),
-                        "username": f"{data.get('given_name', '')} {data.get('family_name', '')}".strip(),
-                        "name": f"{data.get('given_name', '')} {data.get('family_name', '')}".strip(),
-                        "email": data.get("email")
-                    }
-                
+                    return {"user_id": data.get("sub"), "username": f"{data.get('given_name', '')} {data.get('family_name', '')}".strip(), "name": f"{data.get('given_name', '')} {data.get('family_name', '')}".strip(), "email": data.get("email")}
                 elif platform in ["google", "youtube"]:
-                    return {
-                        "user_id": data.get("sub"),
-                        "username": data.get("email"),
-                        "name": data.get("name"),
-                        "email": data.get("email")
-                    }
-                
+                    return {"user_id": data.get("sub"), "username": data.get("email"), "name": data.get("name"), "email": data.get("email")}
                 elif platform == "tiktok":
                     user_data = data.get("data", {}).get("user", {})
-                    return {
-                        "user_id": user_data.get("open_id"),
-                        "username": user_data.get("display_name"),
-                        "name": user_data.get("display_name"),
-                        "email": None
-                    }
+                    return {"user_id": user_data.get("open_id"), "username": user_data.get("display_name"), "name": user_data.get("display_name")}
                 
-        except httpx.TimeoutException:
-            print(f"⏱️ Timeout getting user info from {platform}")
-            return None
         except Exception as e:
             print(f"❌ Error getting {platform} user info: {e}")
-            import traceback
-            traceback.print_exc()
             return None
         
         return None
 
     @classmethod
     async def _save_connection(
-        cls,
-        db: AsyncSession,
-        user_id: int,
-        platform: str,
-        access_token: str,
-        refresh_token: Optional[str],
-        expires_in: Optional[int],
-        platform_user_id: Optional[str],
-        platform_username: Optional[str] = None,
-        platform_name: Optional[str] = None,
+        cls, db: AsyncSession, user_id: int, platform: str, access_token: str,
+        refresh_token: Optional[str], expires_in: Optional[int], platform_user_id: Optional[str],
+        platform_username: Optional[str] = None, platform_name: Optional[str] = None,
         platform_email: Optional[str] = None
     ) -> models.SocialConnection:
-        """Save or update social connection in database"""
         
         if not platform_user_id:
-            raise ValueError(f"platform_user_id is required to save connection for {platform}")
+            raise ValueError(f"platform_user_id is required for {platform}")
         
-        if not platform_username:
-            platform_username = platform_name or platform_user_id
+        platform_username = platform_username or platform_name or platform_user_id
         
-        # Normalize platform name
-        platform_upper = platform.upper()
-        
-        # Check if connection already exists
         result = await db.execute(
             select(models.SocialConnection).where(
                 models.SocialConnection.user_id == user_id,
-                models.SocialConnection.platform == platform_upper,
+                models.SocialConnection.platform == platform.upper(),
                 models.SocialConnection.platform_user_id == platform_user_id
             )
         )
         connection = result.scalar_one_or_none()
         
-        # Calculate token expiration
-        expires_at = (
-            datetime.utcnow() + timedelta(seconds=int(expires_in))
-            if expires_in else None
-        )
+        expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in)) if expires_in else None
         
         if connection:
-            # Update existing connection
-            print(f"♻️ Updating existing connection for {platform}")
             connection.platform_username = platform_username
             connection.username = platform_name or platform_username
             connection.access_token = access_token
             connection.refresh_token = refresh_token
             connection.token_expires_at = expires_at
             connection.is_active = True
-            connection.last_synced = datetime.utcnow()
             connection.updated_at = datetime.utcnow()
         else:
-            # Create new connection
-            print(f"➕ Creating new connection for {platform}")
             connection = models.SocialConnection(
-                user_id=user_id,
-                platform=platform_upper,
-                platform_user_id=platform_user_id,
-                platform_username=platform_username,
-                username=platform_name or platform_username,
-                access_token=access_token,
-                refresh_token=refresh_token,
-                token_expires_at=expires_at,
-                is_active=True,
-                last_synced=datetime.utcnow(),
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                user_id=user_id, platform=platform.upper(), platform_user_id=platform_user_id,
+                platform_username=platform_username, username=platform_name or platform_username,
+                access_token=access_token, refresh_token=refresh_token, token_expires_at=expires_at,
+                is_active=True, updated_at=datetime.utcnow()
             )
             db.add(connection)
         
         await db.commit()
         await db.refresh(connection)
-        
         return connection
 
     @classmethod
     def get_supported_platforms(cls) -> Dict[str, Dict]:
-        """Get list of supported OAuth platforms with their configuration status"""
         platforms = {}
-        
         for platform, config in OAUTH_CONFIGS.items():
             platforms[platform] = {
                 "name": config.get("platform_display_name", platform.title()),
@@ -713,5 +453,4 @@ class OAuthService:
                 "uses_pkce": config.get("uses_pkce", False),
                 "scopes": config.get("scope", "").split(",") if config.get("scope") else []
             }
-        
         return platforms
