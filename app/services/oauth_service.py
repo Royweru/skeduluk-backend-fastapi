@@ -169,9 +169,18 @@ class OAuthService:
         state_jwt = jwt.encode(state_payload, settings.SECRET_KEY, algorithm="HS256")
         params["state"] = state_jwt
 
+        # --- Logging for Debugging ---
+        print("="*50)
+        print(f"Initiating OAuth for platform: {platform}")
+        print(f"  Client ID: {params['client_id']}")
+        print(f"  Client SECRET: {params['client_secret']}")
+        print(f"  Redirect URI: {params['redirect_uri']}")
+        print(f"  Scope: {params.get('scope')}")
+        print("="*50)
+
         query_string = urlencode(params)
         auth_url = f"{config['auth_url']}?{query_string}"
-        print(f"🔗 Generated OAuth URL for {platform}: {auth_url[:100]}...")
+        print(f"🔗 Generated OAuth URL for {platform}: {auth_url[:150]}...")
         return auth_url
 
     @classmethod
