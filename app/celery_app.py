@@ -3,21 +3,8 @@ from celery import Celery
 import os
 import ssl
 
-# Get Redis URL from environment
+# Get Redis URL from environment, default to local Redis
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-
-# Configure broker and backend URLs with SSL parameters
-def configure_redis_url(url: str) -> dict:
-    """Configure Redis connection with SSL support for Upstash"""
-    if url.startswith('rediss://'):
-        # Return configuration dict with SSL settings
-        return {
-            'url': url,
-            'ssl': {
-                'ssl_cert_reqs': ssl.CERT_NONE,
-            }
-        }
-    return {'url': url}
 
 # Initialize Celery
 celery_app = Celery(
@@ -26,34 +13,39 @@ celery_app = Celery(
     backend=REDIS_URL,
 )
 
-# Configure Celery with SSL support
-celery_app.conf.update(
-    # Task settings
-    task_serializer='json',
-    accept_content=['json'],
-    result_serializer='json',
-    timezone='UTC',
-    enable_utc=True,
-    task_track_started=True,
-    task_time_limit=30 * 60,
-    task_soft_time_limit=25 * 60,
-    worker_prefetch_multiplier=1,
-    worker_max_tasks_per_child=1000,
-    
-    # SSL Configuration for broker and backend
-    broker_use_ssl={
-        'ssl_cert_reqs': ssl.CERT_NONE,
-        'ssl_ca_certs': None,
-        'ssl_certfile': None,
-        'ssl_keyfile': None,
+# Base Celery configuration
+celery_config = {
+    'task_serializer': 'json',
+    'accept_content': ['json'],
+    'result_serializer': 'json',
+    'timezone': 'UTC',
+    'enable_utc': True,
+    'task_track_started': True,
+    'task_time_limit': 30 * 60,
+    'task_soft_time_limit': 25 * 60,
+    'worker_prefetch_multiplier': 1,
+    'worker_max_tasks_per_child': 1000,
+    'beat_schedule': {
+        'check-scheduled-posts-every-minute': {
+            'task': 'app.tasks.scheduled_tasks.check_scheduled_posts',
+            'schedule': 60.0,  # Run every 60 seconds
+        },
     },
-    redis_backend_use_ssl={
-        'ssl_cert_reqs': ssl.CERT_NONE,
-        'ssl_ca_certs': None,
-        'ssl_certfile': None,
-        'ssl_keyfile': None,
-    },
-)
+}
 
-# Auto-discover tasks
-celery_app.autodiscover_tasks(['app.tasks'])
+# Add SSL options only if using a 'rediss://' URL (like for Upstash)
+if REDIS_URL.startswith('rediss://'):
+    print("✅ Configuring Celery with SSL for Redis.")
+    ssl_options = {
+        'ssl_cert_reqs': ssl.CERT_NONE
+    }
+    celery_config['broker_use_ssl'] = ssl_options
+    celery_config['redis_backend_use_ssl'] = ssl_options
+else:
+    print("ℹ️  Configuring Celery without SSL for Redis.")
+
+# Update Celery app with the final configuration
+celery_app.conf.update(celery_config)
+
+# Add 'imports' to ensure tasks are discovered
+celery_app.conf.imports = ('app.tasks.scheduled_tasks',)

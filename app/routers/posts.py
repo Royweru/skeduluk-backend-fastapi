@@ -92,6 +92,7 @@ async def create_post(
             platforms=platforms_list,
             scheduled_for=scheduled_datetime,
             enhanced_content=enhanced_content_dict,
+            platform_specific_content=platform_specific_content_dict,
             image_urls=image_urls,
             video_urls=video_urls,
             audio_file_url=audio_file_url
