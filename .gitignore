@@ -1,2 +1,3 @@
 venv/
 .env
+python test_redis_connection.py

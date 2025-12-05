@@ -1,30 +1,41 @@
 # app/tasks/scheduled_tasks.py
 from datetime import datetime
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 from ..celery_app import celery_app
-from ..database import get_async_database_url, AsyncSessionLocal
+from ..database import AsyncSessionLocal
 from ..crud import PostCRUD, SocialConnectionCRUD, PostResultCRUD
 from ..services.social_service import SocialService
+import asyncio
+
+def run_async(coro):
+    """Helper function to run an async coroutine in a sync context."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # 'RuntimeError: There is no current event loop...'
+        return asyncio.run(coro)
+    return loop.run_until_complete(coro)
 
 @celery_app.task(bind=True, max_retries=3)
 def publish_post_task(self, post_id: int):
     """Publish a post to social platforms"""
-    import asyncio
     
     async def _publish_post():
-        # Create a new async engine for this task
-        engine = create_async_engine(
-            get_async_database_url(),
-            pool_pre_ping=True,  # Verify connections before using
-            pool_recycle=3600,   # Recycle connections after 1 hour
-        )
-        
-        async with AsyncSessionLocal(bind=engine) as db:
+        # Use the shared session from app.database
+        async with AsyncSessionLocal() as db:
             try:
                 # Get post
                 post = await PostCRUD.get_post_by_id(db, post_id, None) 
                 if not post:
-                    return {"success": False, "error": "Post not found"}
+                    # This is the original error point. If it still happens,
+                    # it might be a genuine race condition. Adding a small delay
+                    # before the first retry can help.
+                    try:
+                        # Retry with a short countdown
+                        raise self.retry(exc=Exception("Post not found, retrying..."), countdown=10)
+                    except self.MaxRetriesExceededError:
+                        # If it still fails after retries, return the final error
+                        return {"success": False, "error": "Post not found after retries"}
+
                 
                 # Update status to posting
                 await PostCRUD.update_post_status(db, post_id, "posting")
@@ -154,12 +165,8 @@ def publish_post_task(self, post_id: int):
                 # Retry the task if we haven't exceeded max retries
                 raise self.retry(exc=e, countdown=60)  # Retry after 60 seconds
                 
-            finally:
-                await engine.dispose()
-    
-    # Run the async function
     try:
-        return asyncio.run(_publish_post())
+        return run_async(_publish_post())
     except Exception as e:
         print(f"Fatal error in publish_post_task: {str(e)}")
         import traceback
@@ -173,16 +180,10 @@ def publish_post_task(self, post_id: int):
 @celery_app.task
 def check_scheduled_posts():
     """Check for posts that need to be published"""
-    import asyncio
     
     async def _check_posts():
-        # Create a new async engine for this task
-        engine = create_async_engine(
-            get_async_database_url(),
-            pool_pre_ping=True,
-        )
-        
-        async with AsyncSessionLocal(bind=engine) as db:
+        # Use the shared session from app.database
+        async with AsyncSessionLocal() as db:
             try:
                 # Get posts scheduled for now or earlier
                 posts = await PostCRUD.get_scheduled_posts(db)
@@ -197,9 +198,8 @@ def check_scheduled_posts():
                     "checked_posts": len(posts),
                     "queued": len(posts)
                 }
-                
-            finally:
-                await engine.dispose()
-    
-    # Run the async function
-    return asyncio.run(_check_posts())
+            except Exception as e:
+                print(f"Error in check_scheduled_posts: {e}")
+                return {"success": False, "error": str(e)}
+
+    return run_async(_check_posts())

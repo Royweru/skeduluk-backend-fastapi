@@ -34,15 +34,15 @@ celery_config = {
 }
 
 # Add SSL options only if using a 'rediss://' URL (like for Upstash)
-if REDIS_URL.startswith('rediss://'):
-    print("✅ Configuring Celery with SSL for Redis.")
-    ssl_options = {
-        'ssl_cert_reqs': ssl.CERT_NONE
-    }
-    celery_config['broker_use_ssl'] = ssl_options
-    celery_config['redis_backend_use_ssl'] = ssl_options
-else:
-    print("ℹ️  Configuring Celery without SSL for Redis.")
+# if REDIS_URL.startswith('rediss://'):
+#     print("✅ Configuring Celery with SSL for Redis.")
+#     ssl_options = {
+#         'ssl_cert_reqs': ssl.CERT_NONE
+#     }
+#     celery_config['broker_use_ssl'] = ssl_options
+#     celery_config['redis_backend_use_ssl'] = ssl_options
+# else:
+#     print("ℹ️  Configuring Celery without SSL for Redis.")
 
 # Update Celery app with the final configuration
 celery_app.conf.update(celery_config)

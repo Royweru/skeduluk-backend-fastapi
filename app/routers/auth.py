@@ -1,7 +1,7 @@
 # app/routers/auth.py
 from datetime import timedelta
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -200,30 +200,38 @@ async def oauth_authorize(
     """
     Initiate OAuth flow for a social platform
     Returns the authorization URL for the frontend to open in a popup
+    
+    Supports: twitter, facebook, instagram, youtube
     """
     try:
         auth_url = await OAuthService.initiate_oauth(current_user.id, platform)
         return {"auth_url": auth_url}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ OAuth initiate error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/oauth/{platform}/callback")
+@router.get("/oauth/callback/{platform}")
 async def oauth_callback(
     platform: str,
-    code: str,
-    state: str,
+    code: str = Query(...),
+    state: str = Query(...),
+    error: str = Query(None),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Handle OAuth callback from social platform
     Returns HTML that closes popup and communicates with parent window
     """
-    result = await OAuthService.handle_oauth_callback(platform, code, state, db)
+    result = await OAuthService.handle_oauth_callback(platform, code, state, db, error)
     
     # Return HTML that closes popup and communicates with parent window
     if result["success"]:
         username = result.get("username", "")
+        platform_display = platform.title()
+        
         return HTMLResponse(content=f"""
         <!DOCTYPE html>
         <html>
@@ -300,13 +308,13 @@ async def oauth_callback(
             <div class="container">
                 <div class="icon">✅</div>
                 <h1>Connected Successfully!</h1>
-                <p>Your {platform.title()} account has been linked</p>
+                <p>Your {platform_display} account has been linked</p>
                 {f'<p class="username">{username}</p>' if username else ''}
                 <div class="loader"></div>
                 <p style="margin-top: 1rem; font-size: 0.875rem;">Closing window...</p>
             </div>
             <script>
-                console.log('OAuth callback successful for {platform}');
+                console.log('✅ OAuth callback successful for {platform}');
                 
                 // Send message to parent window
                 if (window.opener) {{
@@ -315,16 +323,16 @@ async def oauth_callback(
                             type: 'OAUTH_SUCCESS',
                             platform: '{platform}',
                             username: '{username}'
-                        }}, '{settings.FRONTEND_URL}');
-                        console.log('Message sent to parent window');
+                        }}, '*');
+                        console.log('📤 Message sent to parent window');
                     }} catch (error) {{
-                        console.error('Error sending message:', error);
+                        console.error('❌ Error sending message:', error);
                     }}
                 }}
                 
                 // Close window after 1.5 seconds
                 setTimeout(() => {{
-                    console.log('Closing window...');
+                    console.log('🚪 Closing window...');
                     window.close();
                     
                     // Fallback: try to close again after 500ms
@@ -340,6 +348,8 @@ async def oauth_callback(
         """, status_code=200)
     else:
         error_message = result.get("error", "Unknown error occurred")
+        platform_display = platform.title()
+        
         return HTMLResponse(content=f"""
         <!DOCTYPE html>
         <html>
@@ -403,11 +413,12 @@ async def oauth_callback(
             <div class="container">
                 <div class="icon">❌</div>
                 <h1>Connection Failed</h1>
+                <p style="margin-bottom: 1rem;">Failed to connect {platform_display}</p>
                 <div class="error-message">{error_message}</div>
                 <p>This window will close in 3 seconds...</p>
             </div>
             <script>
-                console.error('OAuth callback failed for {platform}:', '{error_message}');
+                console.error('❌ OAuth callback failed for {platform}:', '{error_message}');
                 
                 // Send error to parent window
                 if (window.opener) {{
@@ -416,16 +427,16 @@ async def oauth_callback(
                             type: 'OAUTH_ERROR',
                             platform: '{platform}',
                             error: '{error_message}'
-                        }}, '{settings.FRONTEND_URL}');
-                        console.log('Error message sent to parent window');
+                        }}, '*');
+                        console.log('📤 Error message sent to parent window');
                     }} catch (error) {{
-                        console.error('Error sending message:', error);
+                        console.error('❌ Error sending message:', error);
                     }}
                 }}
                 
                 // Close window after 3 seconds
                 setTimeout(() => {{
-                    console.log('Closing window...');
+                    console.log('🚪 Closing window...');
                     window.close();
                     
                     // Fallback
@@ -439,3 +450,115 @@ async def oauth_callback(
         </body>
         </html>
         """, status_code=200)
+
+
+@router.get("/connections")
+async def get_connections(
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Get all social media connections for the current user"""
+    from sqlalchemy import select
+    
+    result = await db.execute(
+        select(models.SocialConnection).where(
+            models.SocialConnection.user_id == current_user.id
+        )
+    )
+    connections = result.scalars().all()
+    
+    return {
+        "connections": [
+            {
+                "id": conn.id,
+                "platform": conn.platform,
+                "username": conn.username,
+                "platform_username": conn.platform_username,
+                "is_active": conn.is_active,
+                "connected_at": conn.created_at.isoformat() if conn.created_at else None,
+                "expires_at": conn.token_expires_at.isoformat() if conn.token_expires_at else None
+            }
+            for conn in connections
+        ]
+    }
+
+
+@router.delete("/connections/{connection_id}")
+async def delete_connection(
+    connection_id: int,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Delete a social media connection"""
+    from sqlalchemy import select, delete
+    
+    result = await db.execute(
+        select(models.SocialConnection).where(
+            models.SocialConnection.id == connection_id,
+            models.SocialConnection.user_id == current_user.id
+        )
+    )
+    connection = result.scalar_one_or_none()
+    
+    if not connection:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    
+    await db.execute(
+        delete(models.SocialConnection).where(
+            models.SocialConnection.id == connection_id
+        )
+    )
+    await db.commit()
+    
+    return {"message": f"{connection.platform} connection deleted successfully"}
+
+
+@router.post("/connections/{connection_id}/refresh")
+async def refresh_connection(
+    connection_id: int,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Manually refresh a connection's access token"""
+    from sqlalchemy import select
+    
+    result = await db.execute(
+        select(models.SocialConnection).where(
+            models.SocialConnection.id == connection_id,
+            models.SocialConnection.user_id == current_user.id
+        )
+    )
+    connection = result.scalar_one_or_none()
+    
+    if not connection:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    
+    refresh_result = await OAuthService.refresh_access_token(connection, db)
+    
+    if not refresh_result:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to refresh token. Please reconnect your account."
+        )
+    
+    return {
+        "message": "Token refreshed successfully",
+        "expires_at": connection.token_expires_at.isoformat() if connection.token_expires_at else None
+    }
+
+
+@router.get("/platforms")
+async def get_supported_platforms():
+    """Get list of supported platforms and their configuration status"""
+    from app.services.oauth_service import OAUTH_CONFIGS
+    
+    platforms = []
+    for platform, config in OAUTH_CONFIGS.items():
+        platforms.append({
+            "id": platform,
+            "name": config.get("platform_display_name", platform.title()),
+            "configured": bool(config.get("client_id") and config.get("client_secret")),
+            "uses_pkce": config.get("uses_pkce", False)
+        })
+    
+    return {"platforms": platforms}
