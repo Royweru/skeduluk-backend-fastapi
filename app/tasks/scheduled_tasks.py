@@ -1,205 +1,238 @@
 # app/tasks/scheduled_tasks.py
+import asyncio
 from datetime import datetime
-from sqlalchemy.ext.asyncio import AsyncSession
+import json
+import os
+import traceback
+from dotenv import load_dotenv
+from celery import Task
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+
 from ..celery_app import celery_app
-from ..database import AsyncSessionLocal
 from ..crud import PostCRUD, SocialConnectionCRUD, PostResultCRUD
 from ..services.social_service import SocialService
-import asyncio
+import logging
 
-def run_async(coro):
-    """Helper function to run an async coroutine in a sync context."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:  # 'RuntimeError: There is no current event loop...'
-        return asyncio.run(coro)
-    return loop.run_until_complete(coro)
+logger = logging.getLogger(__name__)
+# Load environment variables
+load_dotenv()
 
-@celery_app.task(bind=True, max_retries=3)
-def publish_post_task(self, post_id: int):
-    """Publish a post to social platforms"""
+def get_async_database_url():
+    """Convert DATABASE_URL to asyncpg format"""
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise ValueError("DATABASE_URL environment variable is not set")
     
-    async def _publish_post():
-        # Use the shared session from app.database
-        async with AsyncSessionLocal() as db:
-            try:
-                # Get post
-                post = await PostCRUD.get_post_by_id(db, post_id, None) 
-                if not post:
-                    # This is the original error point. If it still happens,
-                    # it might be a genuine race condition. Adding a small delay
-                    # before the first retry can help.
-                    try:
-                        # Retry with a short countdown
-                        raise self.retry(exc=Exception("Post not found, retrying..."), countdown=10)
-                    except self.MaxRetriesExceededError:
-                        # If it still fails after retries, return the final error
-                        return {"success": False, "error": "Post not found after retries"}
+    # Remove query parameters for base URL
+    if '?' in database_url:
+        base_url = database_url.split('?')[0]
+    else:
+        base_url = database_url
+    
+    # Convert to asyncpg format
+    if base_url.startswith('postgresql://'):
+        return base_url.replace('postgresql://', 'postgresql+asyncpg://')
+    elif base_url.startswith('postgres://'):
+        return base_url.replace('postgres://', 'postgresql+asyncpg://')
+    else:
+        return base_url
 
-                
-                # Update status to posting
-                await PostCRUD.update_post_status(db, post_id, "posting")
-                
-                # Get user's social connections
-                connections = await SocialConnectionCRUD.get_connections_by_user(
-                    db, post.user_id
+def create_task_engine():
+    """Create a new engine instance for each task to avoid event loop conflicts"""
+    return create_async_engine(
+        get_async_database_url(),
+        echo=False,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        connect_args={
+            "ssl": "require",
+            "server_settings": {
+                "application_name": "social_scheduler"
+            }
+        }
+    )
+
+def get_async_session_local(engine):
+    """Create session maker bound to task-specific engine"""
+    return async_sessionmaker(
+        engine, 
+        class_=AsyncSession, 
+        expire_on_commit=False
+    )
+
+def deserialize_platforms(platforms_raw):
+    """Helper to ensure platforms is a list"""
+    if isinstance(platforms_raw, str):
+        try:
+            return json.loads(platforms_raw)
+        except json.JSONDecodeError:
+            # Fallback: split by comma if it's a plain string
+            return [p.strip().upper() for p in platforms_raw.split(',') if p.strip()]
+    return platforms_raw or []
+
+# Core task logic (async)
+async def _publish_post_async(task_self, post_id: int):
+    """Publish a post to social platforms - async implementation"""
+    engine = create_task_engine()
+    AsyncSessionLocal = get_async_session_local(engine)
+    
+    async with AsyncSessionLocal() as db:
+        logger.info(f"Task {task_self.request.id} starting with engine {id(engine)}")
+        try:
+            # Get post
+            post = await PostCRUD.get_post_by_id(db, post_id, None) 
+            if not post:
+                try:
+                    raise task_self.retry(exc=Exception("Post not found, retrying..."), countdown=10)
+                except task_self.MaxRetriesExceededError:
+                    return {"success": False, "error": "Post not found after retries"}
+
+            # Update status to posting
+            await PostCRUD.update_post_status(db, post_id, "posting")
+            
+            # Get user connections
+            connections = await SocialConnectionCRUD.get_connections_by_user(db, post.user_id)
+            
+            # Filter relevant connections based on post platforms
+            post_platforms = deserialize_platforms(post.platforms)
+            relevant_connections = [conn for conn in connections if conn.platform in post_platforms]
+            
+            if not relevant_connections:
+                await PostCRUD.update_post_status(
+                    db, post_id, "failed", 
+                    {"error": "No connected platforms found"}
                 )
+                await db.commit()
+                return {"success": False, "error": "No connected platforms found"}
+            
+            results = []
+            errors = []
+            
+            # Publish to each platform
+            for connection in relevant_connections:
+                content = post.original_content
+                if post.enhanced_content and connection.platform.lower() in post.enhanced_content:
+                    content = post.enhanced_content[connection.platform.lower()]
                 
-                # Filter connections for the platforms in the post
-                relevant_connections = [
-                    conn for conn in connections 
-                    if conn.platform in post.platforms
-                ]
-                
-                if not relevant_connections:
-                    await PostCRUD.update_post_status(
-                        db, post_id, "failed", 
-                        "No connected platforms found"
+                try:
+                    result = await SocialService.publish_to_platform(
+                        connection=connection,
+                        content=content,
+                        image_urls=post.image_urls or [],
+                        video_urls=post.video_urls or []
                     )
-                    return {
-                        "success": False, 
-                        "error": "No connected platforms found"
-                    }
-                
-                results = []
-                errors = []
-                
-                # Post to each platform
-                for connection in relevant_connections:
-                    try:
-                        # Get content for this platform
-                        content = post.original_content
-                        if post.enhanced_content and connection.platform.lower() in post.enhanced_content:
-                            content = post.enhanced_content[connection.platform.lower()]
-                        
-                        # Publish to platform
-                        result = await SocialService.publish_to_platform(
-                            connection=connection,
-                            content=content,
-                            image_urls=post.image_urls or []
-                        )
-                        
-                        # Store result
-                        await PostResultCRUD.create_result(
-                            db, post_id, connection.platform,
-                            "posted" if result.get("success") else "failed",
-                            result.get("platform_post_id"),
-                            result.get("error"),
-                            content
-                        )
-                        
-                        if result.get("success"):
-                            results.append({
-                                "platform": connection.platform, 
-                                "success": True,
-                                "post_id": result.get("platform_post_id")
-                            })
-                        else:
-                            error_msg = result.get('error', 'Unknown error')
-                            errors.append(f"{connection.platform}: {error_msg}")
-                            results.append({
-                                "platform": connection.platform, 
-                                "success": False, 
-                                "error": error_msg
-                            })
-                        
-                    except Exception as e:
-                        error_msg = str(e)
+                    
+                    await PostResultCRUD.create_result(
+                        db, post_id, connection.platform,
+                        "posted" if result.get("success") else "failed",
+                        result.get("platform_post_id"),
+                        result.get("platform_post_url"),
+                        result.get("error"),
+                        content
+                    )
+                    
+                    if result.get("success"):
+                        results.append({
+                            "platform": connection.platform, 
+                            "success": True, 
+                            "post_id": result.get("platform_post_id"),
+                            "url": result.get("url")
+                        })
+                    else:
+                        error_msg = result.get('error', 'Unknown error')
                         errors.append(f"{connection.platform}: {error_msg}")
                         results.append({
                             "platform": connection.platform, 
                             "success": False, 
                             "error": error_msg
                         })
-                        
-                        # Store error result
-                        await PostResultCRUD.create_result(
-                            db, post_id, connection.platform,
-                            "failed", None, error_msg, content
-                        )
-                
-                # Update post status based on results
-                success_count = sum(1 for r in results if r.get("success"))
-                total_platforms = len(results)
-                
-                if success_count == total_platforms:
-                    await PostCRUD.update_post_status(db, post_id, "posted")
-                elif success_count > 0:
-                    await PostCRUD.update_post_status(
-                        db, post_id, "partial", 
-                        "; ".join(errors)
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    errors.append(f"{connection.platform}: {error_msg}")
+                    results.append({
+                        "platform": connection.platform, 
+                        "success": False, 
+                        "error": error_msg
+                    })
+                    await PostResultCRUD.create_result(
+                        db, post_id, connection.platform, 
+                        "failed", None, error_msg, content
                     )
-                else:
-                    await PostCRUD.update_post_status(
-                        db, post_id, "failed", 
-                        "; ".join(errors)
-                    )
-                
+            
+            success_count = sum(1 for r in results if r.get("success"))
+            total_platforms = len(results)
+            
+            # Determine final status
+            final_status = "posted" if success_count == total_platforms else \
+                          "partial" if success_count > 0 else "failed"
+            
+            # Update post status
+            await PostCRUD.update_post_status(
+                db, post_id, final_status, 
+                {"errors": "; ".join(errors)} if errors else None,
+                {r["platform"]: r.get("url") for r in results if r.get("url")}
+            )
+            
+            await db.commit()
+            
+            return {
+                "success": success_count > 0,
+                "total_platforms": total_platforms,
+                "successful": success_count,
+                "failed": total_platforms - success_count,
+                "results": results,
+                "errors": errors if errors else None
+            }
+            
+        except Exception as e:
+            print(f"Error in publish_post_task: {str(e)}")
+            print(traceback.format_exc())
+            
+            try:
+                await PostCRUD.update_post_status(
+                    db, post_id, "failed", 
+                    {"error": f"Task error: {str(e)}"}
+                )
                 await db.commit()
-                
-                return {
-                    "success": success_count > 0,
-                    "total_platforms": total_platforms,
-                    "successful": success_count,
-                    "failed": total_platforms - success_count,
-                    "results": results,
-                    "errors": errors if errors else None
-                }
-                
-            except Exception as e:
-                # Log the full error for debugging
-                import traceback
-                print(f"Error in publish_post_task: {str(e)}")
-                print(traceback.format_exc())
-                
-                # Try to update post status to failed
-                try:
-                    await PostCRUD.update_post_status(
-                        db, post_id, "failed", 
-                        f"Task error: {str(e)}"
-                    )
-                    await db.commit()
-                except:
-                    pass
-                
-                # Retry the task if we haven't exceeded max retries
-                raise self.retry(exc=e, countdown=60)  # Retry after 60 seconds
-                
-    try:
-        return run_async(_publish_post())
-    except Exception as e:
-        print(f"Fatal error in publish_post_task: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return {
-            "success": False,
-            "error": str(e)
-        }
+            except Exception as db_exc:
+                print(f"Failed to update post status to failed: {db_exc}")
+            
+            raise task_self.retry(exc=e, countdown=60)
+        finally:
+            logger.info(f"Task {task_self.request.id} cleaning up engine {id(engine)}")
+            await engine.dispose()
 
+# Public task wrapper (synchronous, for Celery)
+@celery_app.task(bind=True, max_retries=3)
+def publish_post_task(self, post_id: int):
+    """Publish a post to social platforms"""
+    return asyncio.run(_publish_post_async(self, post_id))
+
+# Second task - check scheduled posts
+async def _check_scheduled_async():
+    """Check for posts that need to be published - async implementation"""
+    engine = create_task_engine()
+    AsyncSessionLocal = get_async_session_local(engine)
+    
+    async with AsyncSessionLocal() as db:
+        try:
+            # Get all scheduled posts ready to be published
+            posts = await PostCRUD.get_scheduled_posts(db, limit=50)
+            print(f"Found {len(posts)} posts to publish")
+            
+            # Queue each post for publishing
+            for post in posts:
+                publish_post_task.delay(post.id)
+            
+            return {"checked_posts": len(posts), "queued": len(posts)}
+        except Exception as e:
+            print(f"Error in check_scheduled_posts: {e}")
+            return {"success": False, "error": str(e)}
+        finally:
+            await engine.dispose()
 
 @celery_app.task
 def check_scheduled_posts():
     """Check for posts that need to be published"""
-    
-    async def _check_posts():
-        # Use the shared session from app.database
-        async with AsyncSessionLocal() as db:
-            try:
-                # Get posts scheduled for now or earlier
-                posts = await PostCRUD.get_scheduled_posts(db)
-                
-                print(f"Found {len(posts)} posts to publish")
-                
-                for post in posts:
-                    # Queue each post for publishing
-                    publish_post_task.delay(post.id)
-                
-                return {
-                    "checked_posts": len(posts),
-                    "queued": len(posts)
-                }
-            except Exception as e:
-                print(f"Error in check_scheduled_posts: {e}")
-                return {"success": False, "error": str(e)}
-
-    return run_async(_check_posts())
+    return asyncio.run(_check_scheduled_async())
