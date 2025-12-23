@@ -235,15 +235,14 @@ class PostCRUD:
         return result.scalars().all()
     
     @staticmethod
-    async def get_post_by_id(db: AsyncSession, post_id: int, user_id: int) -> Optional[models.Post]:
-        result = await db.execute(
-            select(models.Post).where(
-                and_(
-                    models.Post.id == post_id,
-                    models.Post.user_id == user_id
-                )
-            )
-        )
+    async def get_post_by_id(db: AsyncSession,
+                             post_id: int, 
+                             user_id: Optional[int] = None
+                             ) -> Optional[models.Post]:
+        query = select(models.Post).where(models.Post.id == post_id)
+        if user_id is not None:
+            query = query.where(models.Post.user_id == user_id)
+        result = await db.execute(query)
         return result.scalar_one_or_none()
 
     @staticmethod

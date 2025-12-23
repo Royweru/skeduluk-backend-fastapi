@@ -1,0 +1,8 @@
+# Stop everything
+docker-compose down
+
+# Start with new config (rebuild)
+docker-compose up --build
+
+# Or run in background
+docker-compose up --build -d

@@ -99,7 +99,7 @@ async def create_post(
         )
         
         post = await PostService.create_post(db, post_data, current_user.id)
-        
+        print(f"Created post with ID: {post.id}")
         # Convert Post model to dict using model_dump() for Pydantic v2
         # First, convert to PostResponse schema
         post_response = schemas.PostResponse(
