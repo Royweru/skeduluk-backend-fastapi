@@ -218,7 +218,7 @@ async def oauth_callback(
     platform: str,
     code: str = Query(...),
     state: str = Query(...),
-    error: str = Query(None),
+    error: str = Query(default=None),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
