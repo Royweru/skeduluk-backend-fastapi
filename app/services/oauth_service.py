@@ -40,9 +40,8 @@ OAUTH_CONFIGS = {
         "auth_url": "https://www.facebook.com/v20.0/dialog/oauth",
         "token_url": "https://graph.facebook.com/v20.0/oauth/access_token",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/facebook",
-        # ✅ UPDATED: Start with basic permissions - add advanced later after App Review
         "scope": "public_profile,email",  # Minimal for Development Mode
-        # For production (after App Review), add: pages_read_engagement,pages_manage_posts
+        # For production (after App Review), the following scopes will be added: pages_show_list pages_read_engagement,pages_manage_posts
         "user_info_url": "https://graph.facebook.com/v20.0/me?fields=id,name,email,picture",
         "uses_pkce": False,
         "token_auth_method": "body",
