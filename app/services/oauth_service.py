@@ -19,7 +19,6 @@ from app import models
 BASE_URL = settings.BACKEND_URL.rstrip("/")
 CALLBACK_PATH = "/auth/oauth/callback"
 
-# Updated OAuth Configs based on Postiz implementation
 OAUTH_CONFIGS = {
     "twitter": {
         "client_id": settings.TWITTER_CLIENT_ID,
@@ -28,6 +27,7 @@ OAUTH_CONFIGS = {
         "token_url": "https://api.twitter.com/2/oauth2/token",
         "revoke_url": "https://api.twitter.com/2/oauth2/revoke",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/twitter",
+        # ✅ UPDATED: Minimal realistic scopes for social scheduler
         "scope": "tweet.read tweet.write users.read offline.access",
         "user_info_url": "https://api.twitter.com/2/users/me?user.fields=id,name,username,profile_image_url",
         "uses_pkce": True,
@@ -40,8 +40,10 @@ OAUTH_CONFIGS = {
         "auth_url": "https://www.facebook.com/v20.0/dialog/oauth",
         "token_url": "https://graph.facebook.com/v20.0/oauth/access_token",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/facebook",
-        "scope": "public_profile,pages_show_list,pages_read_engagement,pages_manage_posts,pages_manage_metadata",
-        "user_info_url": "https://graph.facebook.com/v20.0/me?fields=id,name,picture",
+        # ✅ UPDATED: Start with basic permissions - add advanced later after App Review
+        "scope": "public_profile,email,pages_show_list",  # Minimal for Development Mode
+        # For production (after App Review), add: pages_read_engagement,pages_manage_posts
+        "user_info_url": "https://graph.facebook.com/v20.0/me?fields=id,name,email,picture",
         "uses_pkce": False,
         "token_auth_method": "body",
         "response_type": "code",
@@ -53,7 +55,9 @@ OAUTH_CONFIGS = {
         "auth_url": "https://www.facebook.com/v20.0/dialog/oauth",
         "token_url": "https://graph.facebook.com/v20.0/oauth/access_token",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/instagram",
-        "scope": "instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,business_management",
+        # ✅ UPDATED: Correct Instagram scopes (requires Business/Creator account)
+        "scope": "instagram_basic,pages_show_list,business_management",  
+        # For posting: add instagram_content_publish after App Review
         "user_info_url": "https://graph.facebook.com/v20.0/me?fields=id,name,picture",
         "uses_pkce": False,
         "token_auth_method": "body",
@@ -67,9 +71,10 @@ OAUTH_CONFIGS = {
         "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
         "token_url": "https://oauth2.googleapis.com/token",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/youtube",
-        "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email openid",
+        # ✅ UPDATED: Correct YouTube scopes
+        "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
         "user_info_url": "https://www.googleapis.com/oauth2/v3/userinfo",
-        "uses_pkce": False,  # Google supports PKCE but we'll use client_secret
+        "uses_pkce": False,
         "token_auth_method": "body",
         "response_type": "code",
         "auth_params": {
@@ -79,7 +84,6 @@ OAUTH_CONFIGS = {
         "platform_display_name": "YouTube"
     }
 }
-
 
 class OAuthService:
     """OAuth Service with improved PKCE and state management"""
