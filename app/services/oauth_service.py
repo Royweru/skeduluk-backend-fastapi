@@ -19,6 +19,7 @@ from app import models
 BASE_URL = settings.BACKEND_URL.rstrip("/")
 CALLBACK_PATH = "/auth/oauth/callback"
 
+# 🔧 IMPROVED: Better OAuth configurations with comments
 OAUTH_CONFIGS = {
     "twitter": {
         "client_id": settings.TWITTER_CLIENT_ID,
@@ -27,11 +28,11 @@ OAUTH_CONFIGS = {
         "token_url": "https://api.twitter.com/2/oauth2/token",
         "revoke_url": "https://api.twitter.com/2/oauth2/revoke",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/twitter",
-        # ✅ UPDATED: Minimal realistic scopes for social scheduler
+        # ✅ Twitter scopes - space separated (NOT comma separated)
         "scope": "tweet.read tweet.write users.read offline.access",
         "user_info_url": "https://api.twitter.com/2/users/me?user.fields=id,name,username,profile_image_url",
-        "uses_pkce": True,
-        "token_auth_method": "basic",
+        "uses_pkce": True,  # Twitter REQUIRES PKCE
+        "token_auth_method": "basic",  # Twitter uses Basic Auth for token exchange
         "response_type": "code"
     },
     "facebook": {
@@ -40,13 +41,17 @@ OAUTH_CONFIGS = {
         "auth_url": "https://www.facebook.com/v20.0/dialog/oauth",
         "token_url": "https://graph.facebook.com/v20.0/oauth/access_token",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/facebook",
-        "scope": "public_profile,email",  # Minimal for Development Mode
-        # For production (after App Review), the following scopes will be added: pages_show_list pages_read_engagement,pages_manage_posts
+        # ✅ Minimal scopes that work in Development Mode
+        # Note: pages_show_list needs to be approved for production
+        "scope": "public_profile,email,pages_show_list",
         "user_info_url": "https://graph.facebook.com/v20.0/me?fields=id,name,email,picture",
         "uses_pkce": False,
         "token_auth_method": "body",
         "response_type": "code",
-        "exchange_token": True  # Facebook needs long-lived token
+        "exchange_token": True,  # Facebook needs long-lived token
+        "auth_params": {
+            "auth_type": "rerequest",  # Re-request declined permissions
+        }
     },
     "instagram": {
         "client_id": settings.FACEBOOK_APP_ID,
@@ -54,15 +59,16 @@ OAUTH_CONFIGS = {
         "auth_url": "https://www.facebook.com/v20.0/dialog/oauth",
         "token_url": "https://graph.facebook.com/v20.0/oauth/access_token",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/instagram",
-        # ✅ UPDATED: Correct Instagram scopes (requires Business/Creator account)
-        "scope": "instagram_basic,pages_show_list,business_management",  
-        # For posting: add instagram_content_publish after App Review
-        "user_info_url": "https://graph.facebook.com/v20.0/me?fields=id,name,picture",
+        "scope": "instagram_basic,pages_show_list,business_management",
+        "user_info_url": "https://graph.facebook.com/v20.0/me?fields=id,name,email,picture",
         "uses_pkce": False,
         "token_auth_method": "body",
         "response_type": "code",
         "exchange_token": True,
-        "platform_display_name": "Instagram"
+        "platform_display_name": "Instagram",
+        "auth_params": {
+            "auth_type": "rerequest",
+        }
     },
     "youtube": {
         "client_id": settings.GOOGLE_CLIENT_ID,
@@ -70,7 +76,6 @@ OAUTH_CONFIGS = {
         "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
         "token_url": "https://oauth2.googleapis.com/token",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/youtube",
-        # ✅ UPDATED: Correct YouTube scopes
         "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
         "user_info_url": "https://www.googleapis.com/oauth2/v3/userinfo",
         "uses_pkce": False,
@@ -84,19 +89,27 @@ OAUTH_CONFIGS = {
     }
 }
 
+
 class OAuthService:
     """OAuth Service with improved PKCE and state management"""
 
     @staticmethod
     def _generate_code_verifier() -> str:
         """Generate code verifier for PKCE (43-128 characters)"""
-        return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
+        # Generate 43 character verifier (Twitter minimum)
+        verifier = base64.urlsafe_b64encode(
+            secrets.token_bytes(32)).decode('utf-8').rstrip('=')
+        print(f"🔐 Generated code verifier (length: {len(verifier)})")
+        return verifier
 
     @staticmethod
     def _generate_code_challenge(verifier: str) -> str:
         """Generate code challenge from verifier using S256"""
         digest = hashlib.sha256(verifier.encode('utf-8')).digest()
-        return base64.urlsafe_b64encode(digest).decode('utf-8').rstrip('=')
+        challenge = base64.urlsafe_b64encode(
+            digest).decode('utf-8').rstrip('=')
+        print(f"🔐 Generated code challenge (length: {len(challenge)})")
+        return challenge
 
     @staticmethod
     def _generate_state() -> str:
@@ -104,19 +117,57 @@ class OAuthService:
         return secrets.token_urlsafe(16)
 
     @classmethod
+    def validate_config(cls, platform: str) -> Tuple[bool, Optional[str]]:
+        """Validate OAuth configuration for a platform"""
+        if platform not in OAUTH_CONFIGS:
+            return False, f"Platform '{platform}' not supported"
+
+        config = OAUTH_CONFIGS[platform]
+
+        # Check required fields
+        if not config.get("client_id"):
+            return False, f"Client ID not configured for {platform}"
+
+        if not config.get("client_secret"):
+            return False, f"Client Secret not configured for {platform}"
+
+        if not config.get("redirect_uri"):
+            return False, f"Redirect URI not configured for {platform}"
+
+        # Validate redirect URI format
+        redirect_uri = config["redirect_uri"]
+        if not redirect_uri.startswith(("http://", "https://")):
+            return False, f"Invalid redirect URI format: {redirect_uri}"
+
+        return True, None
+
+    @classmethod
     async def initiate_oauth(cls, user_id: int, platform: str) -> str:
         """Initiate OAuth flow with proper PKCE and state management"""
         platform = platform.lower()
-        if platform not in OAUTH_CONFIGS:
-            raise HTTPException(status_code=400, detail=f"Unsupported platform: {platform}")
+
+        # Validate configuration
+        is_valid, error_message = cls.validate_config(platform)
+        if not is_valid:
+            raise HTTPException(status_code=500, detail=error_message)
 
         config = OAUTH_CONFIGS[platform]
-        if not all([config.get("client_id"), config.get("client_secret"), config.get("redirect_uri")]):
-            raise HTTPException(status_code=500, detail=f"OAuth for {platform} is not configured.")
+
+        print("\n" + "="*70)
+        print(f"🚀 INITIATING OAUTH FOR {platform.upper()}")
+        print("="*70)
+        print(f"Client ID: {config['client_id'][:15]}..." if config.get(
+            'client_id') else "Client ID: NOT SET")
+        print(
+            f"Client Secret: {'SET' if config.get('client_secret') else 'NOT SET'}")
+        print(f"Redirect URI: {config['redirect_uri']}")
+        print(f"Scopes: {config.get('scope', 'NONE')}")
+        print(f"Uses PKCE: {config.get('uses_pkce', False)}")
+        print("="*70 + "\n")
 
         # Generate state
         state = cls._generate_state()
-        
+
         # State payload for JWT (expires in 15 minutes)
         state_payload = {
             "user_id": user_id,
@@ -124,7 +175,7 @@ class OAuthService:
             "state": state,
             "exp": datetime.utcnow() + timedelta(minutes=15)
         }
-        
+
         # Build authorization parameters
         params = {
             "response_type": config.get("response_type", "code"),
@@ -132,10 +183,10 @@ class OAuthService:
             "redirect_uri": config["redirect_uri"],
             "state": state
         }
-        
+
         if config.get("scope"):
             params["scope"] = config["scope"]
-        
+
         # Add any extra auth params
         params.update(config.get("auth_params", {}))
 
@@ -148,16 +199,22 @@ class OAuthService:
                 "code_challenge_method": "S256"
             })
             state_payload["pkce_verifier"] = code_verifier
-        
+            print(
+                f"✅ PKCE enabled - Verifier length: {len(code_verifier)}, Challenge length: {len(code_challenge)}")
+
         # Encode the state payload into a JWT
-        state_jwt = jwt.encode(state_payload, settings.SECRET_KEY, algorithm="HS256")
+        state_jwt = jwt.encode(
+            state_payload, settings.SECRET_KEY, algorithm="HS256")
         params["state"] = state_jwt
 
         # Build authorization URL
         query_string = urlencode(params, quote_via=quote)
         auth_url = f"{config['auth_url']}?{query_string}"
-        
-        print(f"🔗 OAuth URL for {platform}: {auth_url[:150]}...")
+
+        print(f"🔗 Generated OAuth URL (first 150 chars): {auth_url[:150]}...")
+        print(f"📍 Full redirect will be to: {config['redirect_uri']}")
+        print()
+
         return auth_url
 
     @classmethod
@@ -165,7 +222,12 @@ class OAuthService:
         cls, platform: str, code: str, state: str, db: AsyncSession, error: Optional[str] = None
     ) -> Dict:
         """Handle OAuth callback with proper error handling"""
+        print("\n" + "="*70)
+        print(f"📥 OAUTH CALLBACK RECEIVED FOR {platform.upper()}")
+        print("="*70)
+
         if error:
+            print(f"❌ Error parameter present: {error}")
             return {"success": False, "error": f"Authorization denied: {error}"}
 
         platform = platform.lower()
@@ -174,45 +236,71 @@ class OAuthService:
 
         config = OAUTH_CONFIGS[platform]
 
+        print(f"Code received (first 20 chars): {code[:20]}...")
+        print(f"State received (first 30 chars): {state[:30]}...")
+
         # Decode and validate state JWT
         try:
-            state_payload = jwt.decode(state, settings.SECRET_KEY, algorithms=["HS256"])
-            
+            state_payload = jwt.decode(
+                state, settings.SECRET_KEY, algorithms=["HS256"])
+
             if state_payload.get("platform") != platform:
                 raise JWTError("Platform mismatch in state token")
-            
+
             user_id = state_payload["user_id"]
             code_verifier = state_payload.get("pkce_verifier")
+
+            print(f"✅ State validated - User ID: {user_id}")
+            if code_verifier:
+                print(
+                    f"✅ PKCE verifier retrieved (length: {len(code_verifier)})")
 
         except JWTError as e:
             print(f"❌ Invalid state token: {e}")
             return {"success": False, "error": "Invalid or expired connection link. Please try again."}
 
         try:
+
+            
             # Exchange code for tokens
             token_params = {
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": config["redirect_uri"],
-                "client_id": config["client_id"],
             }
-            
+
+            # ✅ FIX: Only add client_id to body if NOT using Basic Auth
+            if config.get("token_auth_method") != "basic":
+                token_params["client_id"] = config["client_id"]
+                token_params["client_secret"] = config["client_secret"]
+
             if config.get("uses_pkce", False):
                 if not code_verifier:
                     return {"success": False, "error": "PKCE verifier missing from state."}
                 token_params["code_verifier"] = code_verifier
-            
-            if config.get("token_auth_method") != "basic":
-                token_params["client_secret"] = config["client_secret"]
+                print(f"✅ Adding PKCE verifier to token request")
 
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Accept": "application/json"
             }
-            
+
             auth = None
             if config.get("token_auth_method") == "basic":
+                # ✅ For Basic Auth: credentials go in header, NOT body
                 auth = (config["client_id"], config["client_secret"])
+                print(f"✅ Using Basic Auth for token exchange (client_id NOT in body)")
+            else:
+                print(f"✅ Using body parameters for token exchange")
+
+            print("\n" + "-"*70)
+            print("🔄 EXCHANGING CODE FOR TOKEN")
+            print("-"*70)
+            print(f"Token URL: {config['token_url']}")
+            print(f"Redirect URI: {config['redirect_uri']}")
+            print(f"Grant Type: authorization_code")
+            print(f"Auth Method: {config.get('token_auth_method', 'body')}")
+            print("-"*70 + "\n")
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 token_response = await client.post(
@@ -222,31 +310,60 @@ class OAuthService:
                     auth=auth
                 )
 
+                print(f"Token Response Status: {token_response.status_code}")
+
                 if token_response.status_code != 200:
-                    print(f"❌ Token exchange failed: {token_response.status_code} {token_response.text}")
-                    return {"success": False, "error": f"Token exchange failed: {token_response.status_code}"}
-                
+                    error_body = token_response.text
+                    print(f"❌ Token exchange failed!")
+                    print(f"Response body: {error_body}")
+                    print("="*70 + "\n")
+
+                    # Try to parse error message
+                    try:
+                        error_data = token_response.json()
+                        error_msg = error_data.get(
+                            "error_description") or error_data.get("error") or error_body
+                    except:
+                        error_msg = error_body
+
+                    return {"success": False, "error": f"Token exchange failed: {error_msg[:200]}"}
+
                 token_data = token_response.json()
                 access_token = token_data.get("access_token")
-                
+
                 if not access_token:
+                    print("❌ No access token in response")
+                    print(f"Response: {token_data}")
                     return {"success": False, "error": "No access token received"}
+
+                print(f"✅ Access token received (length: {len(access_token)})")
+                print(
+                    f"Token expires in: {token_data.get('expires_in', 'unknown')} seconds")
+                print(
+                    f"Refresh token: {'YES' if token_data.get('refresh_token') else 'NO'}")
 
                 # Exchange for long-lived token (Facebook/Instagram)
                 if config.get("exchange_token"):
+                    print("\n🔄 Exchanging for long-lived token...")
                     access_token, token_data = await cls._exchange_long_lived_token(
                         platform, access_token, config, client
                     )
 
                 # Get user info
+                print("\n🔄 Fetching user info...")
                 user_info = await cls._get_platform_user_info(
                     platform, access_token, config["user_info_url"], client
                 )
-                
+
                 if not user_info:
+                    print("❌ Failed to get user info")
                     return {"success": False, "error": f"Failed to get user profile from {platform}"}
 
+                print(
+                    f"✅ User info retrieved: {user_info.get('username') or user_info.get('name')}")
+
                 # Save connection
+                print("\n💾 Saving connection to database...")
                 connection = await cls._save_connection(
                     db=db,
                     user_id=user_id,
@@ -259,19 +376,24 @@ class OAuthService:
                     platform_name=user_info.get("name"),
                     platform_email=user_info.get("email")
                 )
-                
+
+                print(f"✅ Connection saved with ID: {connection.id}")
+                print("="*70 + "\n")
+
                 return {
                     "success": True,
                     "platform": platform,
                     "username": user_info.get("username") or user_info.get("name"),
                 }
-                
+
         except httpx.TimeoutException:
+            print("❌ Connection timeout")
             return {"success": False, "error": f"Connection timeout with {platform}"}
         except Exception as e:
+            print(f"❌ Unexpected error: {e}")
             import traceback
             traceback.print_exc()
-            return {"success": False, "error": "An unexpected error occurred"}
+            return {"success": False, "error": f"An unexpected error occurred: {str(e)[:100]}"}
 
     @classmethod
     async def _exchange_long_lived_token(
@@ -291,10 +413,11 @@ class OAuthService:
             
             if response.status_code == 200:
                 data = response.json()
-                print(f"✅ Exchanged for long-lived token for {platform}")
+                print(f"✅ Exchanged for long-lived token (expires in {data.get('expires_in', 'unknown')}s)")
                 return data["access_token"], data
             else:
-                print(f"⚠️ Token exchange failed, using short-lived token")
+                print(f"⚠️ Token exchange failed ({response.status_code}), using short-lived token")
+                print(f"Response: {response.text}")
                 return short_token, {"access_token": short_token, "expires_in": 3600}
                 
         except Exception as e:
@@ -393,6 +516,7 @@ class OAuthService:
             
             if response.status_code != 200:
                 print(f"❌ User info error: {response.status_code}")
+                print(f"Response: {response.text}")
                 return None
 
             data = response.json()
@@ -450,6 +574,7 @@ class OAuthService:
         expires_at = datetime.utcnow() + timedelta(seconds=int(expires_in)) if expires_in else None
         
         if connection:
+            print(f"Updating existing connection ID: {connection.id}")
             connection.platform_username = platform_username
             connection.username = platform_name or platform_username
             connection.access_token = access_token
@@ -458,6 +583,7 @@ class OAuthService:
             connection.is_active = True
             connection.updated_at = datetime.utcnow()
         else:
+            print(f"Creating new connection for user {user_id}")
             connection = models.SocialConnection(
                 user_id=user_id,
                 platform=platform.upper(),

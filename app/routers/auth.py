@@ -1,6 +1,6 @@
 # app/routers/auth.py
 from datetime import timedelta
-from typing import Annotated
+from typing import Annotated,Dict,List
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -562,3 +562,174 @@ async def get_supported_platforms():
         })
     
     return {"platforms": platforms}
+
+# Add this test endpoint
+@router.get("/oauth/test/twitter")
+async def test_twitter_oauth(
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """Generate Twitter OAuth URL for testing"""
+    try:
+        auth_url = await OAuthService.initiate_oauth(current_user.id, "twitter")
+        return {
+            "success": True,
+            "auth_url": auth_url,
+            "message": "Copy this URL and paste it in your browser to test"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+# ============== DEBUG ENDPOINTS ==============
+# Add these BEFORE your OAuth routes
+
+@router.get("/oauth/debug/{platform}")
+async def debug_oauth_config(platform: str):
+    """
+    Debug OAuth configuration for a specific platform.
+    Shows configuration without sensitive data.
+    """
+    from app.services.oauth_service import OAUTH_CONFIGS, OAuthService
+    
+    platform = platform.lower()
+    
+    if platform not in OAUTH_CONFIGS:
+        return {
+            "error": f"Platform '{platform}' not supported",
+            "supported_platforms": list(OAUTH_CONFIGS.keys())
+        }
+    
+    config = OAUTH_CONFIGS[platform]
+    
+    # Validate configuration
+    is_valid, error_msg = OAuthService.validate_config(platform)
+    
+    return {
+        "platform": platform,
+        "status": "✅ VALID" if is_valid else f"❌ INVALID: {error_msg}",
+        "configuration": {
+            "client_id": f"{config.get('client_id', 'NOT SET')[:15]}..." if config.get('client_id') else "NOT SET",
+            "client_id_length": len(config.get('client_id', '')) if config.get('client_id') else 0,
+            "client_secret_set": "YES ✅" if config.get('client_secret') else "NO ❌",
+            "client_secret_length": len(config.get('client_secret', '')) if config.get('client_secret') else 0,
+            "redirect_uri": config.get('redirect_uri', 'NOT SET'),
+            "auth_url": config.get('auth_url'),
+            "token_url": config.get('token_url'),
+            "scopes": config.get('scope', 'NONE'),
+            "uses_pkce": config.get('uses_pkce', False),
+            "token_auth_method": config.get('token_auth_method', 'body'),
+            "response_type": config.get('response_type', 'code'),
+        },
+        "warnings": _get_config_warnings(platform, config)
+    }
+
+
+def _get_config_warnings(platform: str, config: Dict) -> List[str]:
+    """Get configuration warnings for a platform"""
+    warnings = []
+    
+    # Check client ID length
+    if config.get('client_id'):
+        client_id_len = len(config['client_id'])
+        if platform == 'twitter' and client_id_len < 20:
+            warnings.append(f"⚠️ Twitter Client IDs are usually 20-30 chars, yours is {client_id_len}. Are you using the OAuth 2.0 Client ID (not API Key)?")
+        if platform == 'facebook' and client_id_len < 10:
+            warnings.append(f"⚠️ Facebook App IDs are usually 15+ digits, yours is {client_id_len}. Check your Facebook App ID.")
+    
+    # Check redirect URI
+    if config.get('redirect_uri'):
+        if 'localhost' in config['redirect_uri']:
+            warnings.append("ℹ️ Using localhost redirect URI - make sure this is also in production config")
+    
+    # Platform-specific warnings
+    if platform == 'twitter' and not config.get('uses_pkce'):
+        warnings.append("❌ Twitter REQUIRES PKCE! Set uses_pkce to True")
+    
+    if platform == 'facebook' and 'pages_show_list' not in config.get('scope', ''):
+        warnings.append("⚠️ Facebook scope missing 'pages_show_list' - you won't be able to post to pages")
+    
+    return warnings
+
+
+@router.get("/oauth/test/{platform}")
+async def test_oauth_flow(
+    platform: str,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """
+    Generate OAuth URL for testing.
+    Copy the URL and paste it in your browser to test the flow.
+    """
+    from app.services.oauth_service import OAuthService
+    
+    try:
+        auth_url = await OAuthService.initiate_oauth(current_user.id, platform)
+        
+        return {
+            "success": True,
+            "platform": platform,
+            "auth_url": auth_url,
+            "instructions": [
+                "1. Copy the 'auth_url' below",
+                "2. Paste it in your browser",
+                "3. Authorize the app",
+                "4. Check your terminal logs for debugging info",
+                "5. After redirect, check if connection was saved"
+            ],
+            "note": "Check your terminal/console for detailed debug logs"
+        }
+    except HTTPException as e:
+        return {
+            "success": False,
+            "error": e.detail,
+            "status_code": e.status_code
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@router.get("/oauth/validate-setup")
+async def validate_oauth_setup():
+    """
+    Validate OAuth setup for all platforms.
+    Shows which platforms are properly configured.
+    """
+    from app.services.oauth_service import OAUTH_CONFIGS, OAuthService
+    
+    results = {}
+    summary = {
+        "total_platforms": len(OAUTH_CONFIGS),
+        "configured": 0,
+        "missing_config": 0,
+        "errors": []
+    }
+    
+    for platform in OAUTH_CONFIGS.keys():
+        is_valid, error_msg = OAuthService.validate_config(platform)
+        
+        results[platform] = {
+            "status": "✅ Ready" if is_valid else "❌ Not Ready",
+            "error": error_msg if not is_valid else None,
+            "redirect_uri": OAUTH_CONFIGS[platform].get('redirect_uri')
+        }
+        
+        if is_valid:
+            summary["configured"] += 1
+        else:
+            summary["missing_config"] += 1
+            summary["errors"].append(f"{platform}: {error_msg}")
+    
+    return {
+        "summary": summary,
+        "platforms": results,
+        "backend_url": settings.BACKEND_URL,
+        "callback_path": "/auth/oauth/callback"
+    }
+
+        
