@@ -225,7 +225,7 @@ class OAuthService:
         print("\n" + "="*70)
         print(f"📥 OAUTH CALLBACK RECEIVED FOR {platform.upper()}")
         print("="*70)
-
+        
         if error:
             print(f"❌ Error parameter present: {error}")
             return {"success": False, "error": f"Authorization denied: {error}"}
@@ -235,61 +235,60 @@ class OAuthService:
             return {"success": False, "error": f"Unsupported platform: {platform}"}
 
         config = OAUTH_CONFIGS[platform]
-
+        
         print(f"Code received (first 20 chars): {code[:20]}...")
         print(f"State received (first 30 chars): {state[:30]}...")
 
         # Decode and validate state JWT
         try:
-            state_payload = jwt.decode(
-                state, settings.SECRET_KEY, algorithms=["HS256"])
-
+            state_payload = jwt.decode(state, settings.SECRET_KEY, algorithms=["HS256"])
+            
             if state_payload.get("platform") != platform:
                 raise JWTError("Platform mismatch in state token")
-
+            
             user_id = state_payload["user_id"]
             code_verifier = state_payload.get("pkce_verifier")
-
+            
             print(f"✅ State validated - User ID: {user_id}")
             if code_verifier:
-                print(
-                    f"✅ PKCE verifier retrieved (length: {len(code_verifier)})")
+                print(f"✅ PKCE verifier retrieved (length: {len(code_verifier)})")
 
         except JWTError as e:
             print(f"❌ Invalid state token: {e}")
             return {"success": False, "error": "Invalid or expired connection link. Please try again."}
 
         try:
-
-            
-            # Exchange code for tokens
+            # ✅ FIXED: Build token params based on auth method
             token_params = {
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": config["redirect_uri"],
             }
-
-            # ✅ FIX: Only add client_id to body if NOT using Basic Auth
+            
+            # ✅ FIX: Only add credentials to body if NOT using Basic Auth
             if config.get("token_auth_method") != "basic":
                 token_params["client_id"] = config["client_id"]
                 token_params["client_secret"] = config["client_secret"]
-
+            
+            # Add PKCE verifier if needed
             if config.get("uses_pkce", False):
                 if not code_verifier:
                     return {"success": False, "error": "PKCE verifier missing from state."}
                 token_params["code_verifier"] = code_verifier
-                print(f"✅ Adding PKCE verifier to token request")
+                print(f"✅ Adding PKCE verifier to token request (length: {len(code_verifier)})")
 
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Accept": "application/json"
             }
-
+            
+            # Set up authentication
             auth = None
             if config.get("token_auth_method") == "basic":
-                # ✅ For Basic Auth: credentials go in header, NOT body
+                # ✅ For Basic Auth: credentials in header, NOT body
                 auth = (config["client_id"], config["client_secret"])
-                print(f"✅ Using Basic Auth for token exchange (client_id NOT in body)")
+                print(f"✅ Using Basic Auth for token exchange (credentials in Authorization header)")
+                print(f"   Client ID: {config['client_id'][:15]}...")
             else:
                 print(f"✅ Using body parameters for token exchange")
 
@@ -300,6 +299,8 @@ class OAuthService:
             print(f"Redirect URI: {config['redirect_uri']}")
             print(f"Grant Type: authorization_code")
             print(f"Auth Method: {config.get('token_auth_method', 'body')}")
+            print(f"PKCE Enabled: {config.get('uses_pkce', False)}")
+            print(f"Body Parameters: {list(token_params.keys())}")
             print("-"*70 + "\n")
 
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -311,36 +312,45 @@ class OAuthService:
                 )
 
                 print(f"Token Response Status: {token_response.status_code}")
-
+                
                 if token_response.status_code != 200:
                     error_body = token_response.text
                     print(f"❌ Token exchange failed!")
+                    print(f"Status Code: {token_response.status_code}")
                     print(f"Response body: {error_body}")
+                    
+                    # ✅ Enhanced debugging
+                    print(f"\n🔍 DEBUG INFO:")
+                    print(f"  Token URL: {config['token_url']}")
+                    print(f"  Redirect URI sent: {config['redirect_uri']}")
+                    print(f"  Client ID (first 15): {config['client_id'][:15]}...")
+                    print(f"  Auth Method: {config.get('token_auth_method')}")
+                    print(f"  Has Code Verifier: {bool(code_verifier)}")
+                    if code_verifier:
+                        print(f"  Code Verifier Length: {len(code_verifier)}")
+                    print(f"  Body Params: {list(token_params.keys())}")
                     print("="*70 + "\n")
-
+                    
                     # Try to parse error message
                     try:
                         error_data = token_response.json()
-                        error_msg = error_data.get(
-                            "error_description") or error_data.get("error") or error_body
+                        error_msg = error_data.get("error_description") or error_data.get("error") or error_body
                     except:
                         error_msg = error_body
-
+                    
                     return {"success": False, "error": f"Token exchange failed: {error_msg[:200]}"}
-
+                
                 token_data = token_response.json()
                 access_token = token_data.get("access_token")
-
+                
                 if not access_token:
                     print("❌ No access token in response")
                     print(f"Response: {token_data}")
                     return {"success": False, "error": "No access token received"}
-
+                
                 print(f"✅ Access token received (length: {len(access_token)})")
-                print(
-                    f"Token expires in: {token_data.get('expires_in', 'unknown')} seconds")
-                print(
-                    f"Refresh token: {'YES' if token_data.get('refresh_token') else 'NO'}")
+                print(f"Token expires in: {token_data.get('expires_in', 'unknown')} seconds")
+                print(f"Refresh token: {'YES' if token_data.get('refresh_token') else 'NO'}")
 
                 # Exchange for long-lived token (Facebook/Instagram)
                 if config.get("exchange_token"):
@@ -354,13 +364,12 @@ class OAuthService:
                 user_info = await cls._get_platform_user_info(
                     platform, access_token, config["user_info_url"], client
                 )
-
+                
                 if not user_info:
                     print("❌ Failed to get user info")
                     return {"success": False, "error": f"Failed to get user profile from {platform}"}
-
-                print(
-                    f"✅ User info retrieved: {user_info.get('username') or user_info.get('name')}")
+                
+                print(f"✅ User info retrieved: {user_info.get('username') or user_info.get('name')}")
 
                 # Save connection
                 print("\n💾 Saving connection to database...")
@@ -376,16 +385,16 @@ class OAuthService:
                     platform_name=user_info.get("name"),
                     platform_email=user_info.get("email")
                 )
-
+                
                 print(f"✅ Connection saved with ID: {connection.id}")
                 print("="*70 + "\n")
-
+                
                 return {
                     "success": True,
                     "platform": platform,
                     "username": user_info.get("username") or user_info.get("name"),
                 }
-
+                
         except httpx.TimeoutException:
             print("❌ Connection timeout")
             return {"success": False, "error": f"Connection timeout with {platform}"}
