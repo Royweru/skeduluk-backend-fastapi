@@ -12,55 +12,59 @@ from app.services.post_service import PostService
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 
-
 @router.post("/", response_model=schemas.PostCreateResponse)
 async def create_post(
     original_content: str = Form(...),
     platforms: str = Form(...),
     scheduled_for: Optional[str] = Form(None),
-    enhanced_content: Optional[dict] = Form(None),
-    platform_specific_content: Optional[dict] = Form(None),
+    enhanced_content: Optional[str] = Form(None),
+    platform_specific_content: Optional[str] = Form(None),
     images: Optional[List[UploadFile]] = File(None),
     videos: Optional[List[UploadFile]] = File(None),
     audio: Optional[UploadFile] = File(None),
     current_user: models.User = Depends(auth.get_current_active_user),
     db: AsyncSession = Depends(get_async_db)
 ):
+    """Create a post with platform-specific content support"""
     try:
-        # Parse JSON strings
-        platforms_list = json.loads(platforms)
-        enhanced_content_dict = json.loads(enhanced_content) if enhanced_content else None
-        platform_specific_content_dict = json.loads(platform_specific_content) if platform_specific_content else None
+        # ✅ Parse JSON strings to Python objects
+        platforms_list = json.loads(platforms) if platforms else []
+        
+        enhanced_content_dict = None
+        if enhanced_content:
+            try:
+                enhanced_content_dict = json.loads(enhanced_content)
+            except json.JSONDecodeError:
+                raise HTTPException(400, "Invalid enhanced_content JSON")
+        
+        platform_specific_content_dict = None
+        if platform_specific_content:
+            try:
+                platform_specific_content_dict = json.loads(platform_specific_content)
+            except json.JSONDecodeError:
+                raise HTTPException(400, "Invalid platform_specific_content JSON")
+        
         # Validate platforms
         if not platforms_list or len(platforms_list) == 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="At least one platform must be selected"
-            )
+            raise HTTPException(400, "At least one platform must be selected")
         
         # Handle image uploads
         image_urls = []
         if images:
             try:
                 image_urls = await PostService.upload_images(images, current_user.id)
-                print(f"Uploaded {len(image_urls)} images")
+                print(f"✅ Uploaded {len(image_urls)} images")
             except Exception as e:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to upload images: {str(e)}"
-                )
+                raise HTTPException(500, f"Failed to upload images: {str(e)}")
         
         # Handle video uploads
         video_urls = []
         if videos:
             try:
                 video_urls = await PostService.upload_videos(videos, current_user.id)
-                print(f"Uploaded {len(video_urls)} videos")
+                print(f"✅ Uploaded {len(video_urls)} videos")
             except Exception as e:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to upload videos: {str(e)}"
-                )
+                raise HTTPException(500, f"Failed to upload videos: {str(e)}")
         
         # Handle audio upload
         audio_file_url = None
@@ -71,22 +75,19 @@ async def create_post(
                 transcription = await PostService.transcribe_audio(audio_file_url)
                 if transcription:
                     original_content = f"{original_content}\n\n[Audio transcription]: {transcription}"
-                print(f"Uploaded and transcribed audio")
+                print(f"✅ Uploaded and transcribed audio")
             except Exception as e:
-                print(f"Audio processing error: {e}")
-                # Continue without audio if it fails
+                print(f"⚠️ Audio processing error: {e}")
         
-        # Create post
+        # Parse scheduled date
         scheduled_datetime = None
         if scheduled_for:
             try:
-                scheduled_datetime = datetime.fromisoformat(scheduled_for)
+                scheduled_datetime = datetime.fromisoformat(scheduled_for.replace('Z', '+00:00'))
             except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid date format. Use ISO format."
-                )
+                raise HTTPException(400, "Invalid date format. Use ISO format.")
         
+        # ✅ Create post with parsed data
         post_data = schemas.PostCreate(
             original_content=original_content,
             platforms=platforms_list,
@@ -99,9 +100,9 @@ async def create_post(
         )
         
         post = await PostService.create_post(db, post_data, current_user.id)
-        print(f"Created post with ID: {post.id}")
-        # Convert Post model to dict using model_dump() for Pydantic v2
-        # First, convert to PostResponse schema
+        print(f"✅ Created post ID: {post.id}")
+        
+        # Convert to response schema
         post_response = schemas.PostResponse(
             id=post.id,
             user_id=post.user_id,
@@ -118,24 +119,18 @@ async def create_post(
             updated_at=post.updated_at
         )
         
-        # If no schedule, publish immediately
+        # Queue for publishing if not scheduled
         if not scheduled_for:
             from app.tasks.scheduled_tasks import publish_post_task
-            
-            # Queue the post for immediate publishing
             task = publish_post_task.delay(post.id)
+            print(f"📤 Queued post {post.id} for publishing. Task: {task.id}")
             
-            print(f"Post {post.id} queued for immediate publishing. Task ID: {task.id}")
-            
-            # Use model_dump() instead of dict() for Pydantic v2
             response_data = post_response.model_dump()
-            response_data["message"] = f"Post is being published to {len(platforms_list)} platform(s). This may take a few moments."
+            response_data["message"] = f"Post is being published to {len(platforms_list)} platform(s)"
             response_data["task_id"] = task.id
             
-            # Return as PostCreateResponse
             return schemas.PostCreateResponse(**response_data)
         else:
-            # Scheduled post - use model_dump() instead of dict()
             response_data = post_response.model_dump()
             response_data["message"] = f"Post scheduled for {scheduled_datetime.strftime('%B %d, %Y at %I:%M %p')}"
             
@@ -144,14 +139,10 @@ async def create_post(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error creating post: {str(e)}")
+        print(f"❌ Error creating post: {str(e)}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create post: {str(e)}"
-        )
-
+        raise HTTPException(500, f"Failed to create post: {str(e)}")
 @router.get("/{post_id}/status")
 async def get_post_status(
     post_id: int,
