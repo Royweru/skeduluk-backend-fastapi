@@ -61,14 +61,17 @@ def get_async_session_local(engine):
     )
 
 def deserialize_platforms(platforms_raw):
-    """Helper to ensure platforms is a list"""
+    """Helper to ensure platforms is a list and normalized to uppercase"""
     if isinstance(platforms_raw, str):
         try:
-            return json.loads(platforms_raw)
+            parsed = json.loads(platforms_raw)
+            # Normalize to uppercase
+            return [p.strip().upper() for p in parsed]
         except json.JSONDecodeError:
             # Fallback: split by comma if it's a plain string
             return [p.strip().upper() for p in platforms_raw.split(',') if p.strip()]
-    return platforms_raw or []
+    # If it's already a list, normalize it
+    return [p.strip().upper() for p in (platforms_raw or [])]
 
 # Core task logic (async)
 async def _publish_post_async(task_self, post_id: int):
