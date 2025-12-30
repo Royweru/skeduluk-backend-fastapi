@@ -94,7 +94,7 @@ class PostResult(Base):
     # Post status
     status = Column(String, default="pending")
     platform_post_id = Column(String, nullable=True)
-    post_url = Column(String, nullable=True)
+    platform_post_url = Column(String, nullable=True)
     content_used = Column(Text, nullable=True)
     
     # Engagement metrics
