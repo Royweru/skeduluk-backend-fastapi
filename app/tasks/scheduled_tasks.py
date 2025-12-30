@@ -61,17 +61,25 @@ def get_async_session_local(engine):
     )
 
 def deserialize_platforms(platforms_raw):
-    """Helper to ensure platforms is a list and normalized to uppercase"""
+    """Helper to ensure platforms is a list - MORE ROBUST VERSION"""
+    if platforms_raw is None:
+        return []
+    
+    if isinstance(platforms_raw, list):
+        return [p.strip().upper() for p in platforms_raw if p.strip()]
+    
     if isinstance(platforms_raw, str):
+        # Try JSON first
         try:
             parsed = json.loads(platforms_raw)
-            # Normalize to uppercase
-            return [p.strip().upper() for p in parsed]
+            if isinstance(parsed, list):
+                return [p.strip().upper() for p in parsed if p.strip()]
+            return []
         except json.JSONDecodeError:
-            # Fallback: split by comma if it's a plain string
+            # Fallback: split by comma
             return [p.strip().upper() for p in platforms_raw.split(',') if p.strip()]
-    # If it's already a list, normalize it
-    return [p.strip().upper() for p in (platforms_raw or [])]
+    
+    return []
 
 # Core task logic (async)
 async def _publish_post_async(task_self, post_id: int):
@@ -80,11 +88,12 @@ async def _publish_post_async(task_self, post_id: int):
     AsyncSessionLocal = get_async_session_local(engine)
     
     async with AsyncSessionLocal() as db:
-        logger.info(f"Task {task_self.request.id} starting with engine {id(engine)}")
+        logger.info(f"🚀 Task {task_self.request.id} starting for post {post_id}")
         try:
             # Get post
             post = await PostCRUD.get_post_by_id(db, post_id, None) 
             if not post:
+                logger.error(f"❌ Post {post_id} not found in database")
                 try:
                     raise task_self.retry(exc=Exception("Post not found, retrying..."), countdown=10)
                 except task_self.MaxRetriesExceededError:
@@ -96,33 +105,69 @@ async def _publish_post_async(task_self, post_id: int):
             # Get user connections
             connections = await SocialConnectionCRUD.get_connections_by_user(db, post.user_id)
             
-            # Filter relevant connections based on post platforms
+            # ✅ FIX: Parse platforms properly
             post_platforms = deserialize_platforms(post.platforms)
+            logger.info(f"📋 Post platforms: {post_platforms}")
+            logger.info(f"🔗 Available connections: {[c.platform for c in connections]}")
+            
+            # Filter relevant connections
             relevant_connections = [conn for conn in connections if conn.platform in post_platforms]
             
             if not relevant_connections:
+                error_msg = f"No connected platforms found. Post platforms: {post_platforms}, Connected: {[c.platform for c in connections]}"
+                logger.error(f"❌ {error_msg}")
                 await PostCRUD.update_post_status(
                     db, post_id, "failed", 
-                    {"error": "No connected platforms found"}
+                    {"error": error_msg}
                 )
                 await db.commit()
-                return {"success": False, "error": "No connected platforms found"}
+                return {"success": False, "error": error_msg}
             
             results = []
             errors = []
             
             # Publish to each platform
             for connection in relevant_connections:
+                # ✅ Get content (with better error handling)
                 content = post.original_content
-                if post.enhanced_content and connection.platform.lower() in post.enhanced_content:
-                    content = post.enhanced_content[connection.platform.lower()]
+                
+                # Check for enhanced content
+                if post.enhanced_content:
+                    try:
+                        enhanced_dict = json.loads(post.enhanced_content) if isinstance(post.enhanced_content, str) else post.enhanced_content
+                        platform_key = connection.platform.lower()
+                        
+                        if enhanced_dict and platform_key in enhanced_dict:
+                            content = enhanced_dict[platform_key]
+                            logger.info(f"📝 Using enhanced content for {connection.platform}")
+                    except Exception as parse_err:
+                        logger.warning(f"⚠️ Could not parse enhanced_content: {parse_err}")
+                        # Continue with original content
+                
+                # ✅ Parse media URLs
+                image_urls = []
+                video_urls = []
+                
+                try:
+                    if post.image_urls:
+                        image_urls = json.loads(post.image_urls) if isinstance(post.image_urls, str) else post.image_urls or []
+                    
+                    if post.video_urls:
+                        video_urls = json.loads(post.video_urls) if isinstance(post.video_urls, str) else post.video_urls or []
+                    
+                    logger.info(f"📸 Media for {connection.platform}: {len(image_urls)} images, {len(video_urls)} videos")
+                except Exception as media_err:
+                    logger.warning(f"⚠️ Could not parse media URLs: {media_err}")
+                    image_urls = []
+                    video_urls = []
                 
                 try:
                     result = await SocialService.publish_to_platform(
                         connection=connection,
                         content=content,
-                        image_urls=post.image_urls or [],
-                        video_urls=post.video_urls or []
+                        image_urls=image_urls,
+                        video_urls=video_urls,
+                        db=db
                     )
                     
                     await PostResultCRUD.create_result(
@@ -141,6 +186,7 @@ async def _publish_post_async(task_self, post_id: int):
                             "post_id": result.get("platform_post_id"),
                             "url": result.get("url")
                         })
+                        logger.info(f"✅ Published to {connection.platform}")
                     else:
                         error_msg = result.get('error', 'Unknown error')
                         errors.append(f"{connection.platform}: {error_msg}")
@@ -149,9 +195,11 @@ async def _publish_post_async(task_self, post_id: int):
                             "success": False, 
                             "error": error_msg
                         })
+                        logger.error(f"❌ Failed to publish to {connection.platform}: {error_msg}")
                     
                 except Exception as e:
                     error_msg = str(e)
+                    logger.error(f"❌ Exception publishing to {connection.platform}: {error_msg}")
                     errors.append(f"{connection.platform}: {error_msg}")
                     results.append({
                         "platform": connection.platform, 
@@ -160,7 +208,7 @@ async def _publish_post_async(task_self, post_id: int):
                     })
                     await PostResultCRUD.create_result(
                         db, post_id, connection.platform, 
-                        "failed", None, error_msg, content
+                        "failed", None, None, error_msg, content
                     )
             
             success_count = sum(1 for r in results if r.get("success"))
@@ -179,6 +227,8 @@ async def _publish_post_async(task_self, post_id: int):
             
             await db.commit()
             
+            logger.info(f"✅ Task completed: {success_count}/{total_platforms} platforms succeeded")
+            
             return {
                 "success": success_count > 0,
                 "total_platforms": total_platforms,
@@ -189,8 +239,12 @@ async def _publish_post_async(task_self, post_id: int):
             }
             
         except Exception as e:
-            print(f"Error in publish_post_task: {str(e)}")
-            print(traceback.format_exc())
+            logger.error(f"❌ CRITICAL ERROR in publish_post_task for post {post_id}")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error message: {str(e)}")
+            logger.error(f"Full traceback:")
+            import traceback
+            logger.error(traceback.format_exc())
             
             try:
                 await PostCRUD.update_post_status(
@@ -199,14 +253,21 @@ async def _publish_post_async(task_self, post_id: int):
                 )
                 await db.commit()
             except Exception as db_exc:
-                print(f"Failed to update post status to failed: {db_exc}")
+                logger.error(f"❌ Failed to update post status: {db_exc}")
             
+            # ✅ Don't retry if it's a data parsing error
+            if isinstance(e, (json.JSONDecodeError, KeyError, AttributeError, TypeError)):
+                logger.error(f"❌ Data error - not retrying: {type(e).__name__}")
+                return {
+                    "success": False,
+                    "error": f"Data error: {str(e)}. Check post data format."
+                }
+            
+            # Retry for other errors (network, API issues, etc.)
             raise task_self.retry(exc=e, countdown=60)
         finally:
-            logger.info(f"Task {task_self.request.id} cleaning up engine {id(engine)}")
+            logger.info(f"🧹 Cleaning up engine for task {task_self.request.id}")
             await engine.dispose()
-
-# Public task wrapper (synchronous, for Celery)
 @celery_app.task(bind=True, max_retries=3)
 def publish_post_task(self, post_id: int):
     """Publish a post to social platforms"""
