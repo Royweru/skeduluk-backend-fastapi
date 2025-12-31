@@ -189,7 +189,7 @@ class ContentEnhancementRequest(BaseModel):
     tone: str = Field(default="engaging", description="Desired tone for the content")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "content": "Just launched our new product!",
                 "platforms": ["TWITTER", "LINKEDIN"],
