@@ -1,18 +1,22 @@
 # app/services/social_service.py
 import httpx
+import json
 from typing import Dict, List, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime  
 import asyncio
 import mimetypes
 from pathlib import Path
+from requests_oauthlib import OAuth1Session
+import base64
+from io import BytesIO
 
 from .. import models, crud
 from ..config import settings
 from .oauth_service import OAuthService
 
 class SocialService:
-    """Enhanced social media posting service based on Postiz implementation"""
+    """Enhanced social media posting service"""
     
     @staticmethod
     async def ensure_valid_token(connection: models.SocialConnection, db: AsyncSession) -> str:
@@ -48,6 +52,8 @@ class SocialService:
             return await SocialService._post_to_facebook(access_token, content, image_urls, video_urls)
         elif platform == "INSTAGRAM":
             return await SocialService._post_to_instagram(access_token, content, image_urls, video_urls)
+        elif platform == "LINKEDIN":
+            return await SocialService._post_to_linkedin(access_token, content, image_urls, video_urls)
         elif platform == "YOUTUBE":
             return await SocialService._post_to_youtube(access_token, content, video_urls)
         else:
@@ -66,7 +72,7 @@ class SocialService:
             print(f"Error downloading media: {e}")
             return None
     
-    # ==================== TWITTER/X ====================
+    # ==================== TWITTER/X (FIXED) ====================
     
     @staticmethod
     async def _post_to_twitter(
@@ -76,93 +82,95 @@ class SocialService:
         video_urls: List[str] = None
     ) -> Dict[str, Any]:
         """
-        Post to Twitter/X using API v2
-        Based on Postiz XProvider implementation
+        Post to Twitter/X using OAuth 1.0a (NOT Bearer token)
         """
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-        
-        tweet_data = {"text": content}
-        media_ids = []
-        
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                # Handle video (priority over images)
-                if video_urls:
-                    video_url = video_urls[0]
-                    media_id = await SocialService._upload_twitter_video(
-                        access_token, video_url, client
+            # ✅ Parse OAuth 1.0a tokens
+            # Format: "oauth_token:oauth_token_secret"
+            if ':' not in access_token:
+                return {
+                    "success": False,
+                    "error": "Invalid Twitter token format. Expected 'oauth_token:oauth_secret'"
+                }
+            
+            oauth_token, oauth_token_secret = access_token.split(':', 1)
+            
+            print(f"🐦 Twitter OAuth 1.0a - Token length: {len(oauth_token)}, Secret length: {len(oauth_token_secret)}")
+            
+            # ✅ Create OAuth1Session (synchronous library, but we'll use it)
+            twitter = OAuth1Session(
+                client_key=settings.X_API_KEY,
+                client_secret=settings.X_API_SECRET,
+                resource_owner_key=oauth_token,
+                resource_owner_secret=oauth_token_secret
+            )
+            
+            tweet_data = {"text": content}
+            media_ids = []
+            
+            # Handle images
+            if image_urls:
+                for image_url in image_urls[:4]:  # Twitter max 4 images
+                    media_id = await SocialService._upload_twitter_media_oauth1(
+                        twitter, image_url
                     )
                     if media_id:
                         media_ids.append(media_id)
+            
+            if media_ids:
+                tweet_data["media"] = {"media_ids": media_ids}
+            
+            # Post tweet using OAuth 1.0a
+            print(f"🐦 Posting tweet with OAuth 1.0a...")
+            response = twitter.post(
+                "https://api.twitter.com/2/tweets",
+                json=tweet_data
+            )
+            
+            print(f"🐦 Twitter response status: {response.status_code}")
+            
+            if response.status_code == 201:
+                data = response.json()
+                tweet_id = data["data"]["id"]
                 
-                # Handle images (only if no video)
-                elif image_urls:
-                    for image_url in image_urls[:4]:  # Twitter max 4 images
-                        media_id = await SocialService._upload_twitter_media(
-                            access_token, image_url, "image", client
-                        )
-                        if media_id:
-                            media_ids.append(media_id)
+                return {
+                    "success": True,
+                    "platform_post_id": tweet_id,
+                    "url": f"https://twitter.com/user/status/{tweet_id}"
+                }
+            else:
+                error_text = response.text
+                print(f"❌ Twitter post error: {response.status_code} {error_text}")
+                return {
+                    "success": False,
+                    "error": f"Twitter API error: {error_text}"
+                }
                 
-                if media_ids:
-                    tweet_data["media"] = {"media_ids": media_ids}
-                
-                # Post tweet
-                response = await client.post(
-                    "https://api.twitter.com/2/tweets",
-                    headers=headers,
-                    json=tweet_data
-                )
-                
-                if response.status_code == 201:
-                    data = response.json()
-                    tweet_id = data["data"]["id"]
-                    username = data.get("data", {}).get("author_id", "")
-                    
-                    return {
-                        "success": True,
-                        "platform_post_id": tweet_id,
-                        "url": f"https://twitter.com/user/status/{tweet_id}"
-                    }
-                else:
-                    error_text = response.text
-                    print(f"❌ Twitter post error: {response.status_code} {error_text}")
-                    return {
-                        "success": False,
-                        "error": f"Twitter API error: {error_text}"
-                    }
-                    
         except Exception as e:
             print(f"❌ Twitter post exception: {e}")
+            import traceback
+            traceback.print_exc()
             return {"success": False, "error": str(e)}
     
     @staticmethod
-    async def _upload_twitter_media(
-        access_token: str,
-        media_url: str,
-        media_type: str,
-        client: httpx.AsyncClient
+    async def _upload_twitter_media_oauth1(
+        twitter_session: OAuth1Session,
+        media_url: str
     ) -> Optional[str]:
-        """Upload media to Twitter (image or video init)"""
+        """Upload media to Twitter using OAuth 1.0a"""
         try:
             media_data = await SocialService._download_media(media_url)
             if not media_data:
                 return None
             
-            # Determine media category
-            media_category = "tweet_image" if media_type == "image" else "tweet_video"
+            # Determine media type
+            content_type = mimetypes.guess_type(media_url)[0] or "image/jpeg"
             
-            files = {"media": media_data}
-            headers = {"Authorization": f"Bearer {access_token}"}
-            
-            response = await client.post(
+            # Upload using OAuth 1.0a
+            files = {"media": ("image.jpg", BytesIO(media_data), content_type)}
+            response = twitter_session.post(
                 "https://upload.twitter.com/1.1/media/upload.json",
-                headers=headers,
-                files=files,
-                data={"media_category": media_category}
+                files=files
             )
             
             if response.status_code == 200:
@@ -175,120 +183,180 @@ class SocialService:
             print(f"❌ Twitter media upload error: {e}")
             return None
     
-    @staticmethod
-    async def _upload_twitter_video(
-        access_token: str,
-        video_url: str,
-        client: httpx.AsyncClient
-    ) -> Optional[str]:
-      
-        try:
-            video_data = await SocialService._download_media(video_url)
-            if not video_data:
-                return None
-            
-            headers = {"Authorization": f"Bearer {access_token}"}
-            
-            # INIT
-            init_response = await client.post(
-                "https://upload.twitter.com/1.1/media/upload.json",
-                headers=headers,
-                data={
-                    "command": "INIT",
-                    "total_bytes": len(video_data),
-                    "media_type": "video/mp4",
-                    "media_category": "tweet_video"
-                }
-            )
-            
-            if init_response.status_code != 200:
-                print(f"❌ Video INIT failed: {init_response.text}")
-                return None
-            
-            media_id = init_response.json()["media_id_string"]
-            
-            # APPEND (chunked)
-            chunk_size = 5 * 1024 * 1024  # 5MB chunks
-            for i in range(0, len(video_data), chunk_size):
-                chunk = video_data[i:i + chunk_size]
-                segment_index = i // chunk_size
-                
-                files = {"media": chunk}
-                append_response = await client.post(
-                    "https://upload.twitter.com/1.1/media/upload.json",
-                    headers=headers,
-                    data={
-                        "command": "APPEND",
-                        "media_id": media_id,
-                        "segment_index": segment_index
-                    },
-                    files=files
-                )
-                
-                if append_response.status_code not in [200, 201, 204]:
-                    print(f"❌ Video APPEND failed: {append_response.text}")
-                    return None
-            
-            # FINALIZE
-            finalize_response = await client.post(
-                "https://upload.twitter.com/1.1/media/upload.json",
-                headers=headers,
-                data={
-                    "command": "FINALIZE",
-                    "media_id": media_id
-                }
-            )
-            
-            if finalize_response.status_code == 200:
-                # Wait for processing
-                processing_info = finalize_response.json().get("processing_info")
-                if processing_info:
-                    await SocialService._wait_for_twitter_video_processing(
-                        access_token, media_id, client
-                    )
-                
-                return media_id
-            else:
-                print(f"❌ Video FINALIZE failed: {finalize_response.text}")
-                return None
-                
-        except Exception as e:
-            print(f"❌ Twitter video upload error: {e}")
-            return None
+    # ==================== LINKEDIN (NEW) ====================
     
     @staticmethod
-    async def _wait_for_twitter_video_processing(
+    async def _post_to_linkedin(
         access_token: str,
-        media_id: str,
-        client: httpx.AsyncClient,
-        max_wait: int = 300
-    ):
-        """Wait for Twitter video processing to complete"""
-        headers = {"Authorization": f"Bearer {access_token}"}
-        waited = 0
+        content: str,
+        image_urls: List[str] = None,
+        video_urls: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Post to LinkedIn using API v2
+        Based on your working TypeScript implementation
+        """
+        print("💼 Starting LinkedIn post")
         
-        while waited < max_wait:
-            await asyncio.sleep(5)
-            waited += 5
-            
-            response = await client.get(
-                f"https://upload.twitter.com/1.1/media/upload.json?command=STATUS&media_id={media_id}",
-                headers=headers
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                processing_info = data.get("processing_info", {})
-                state = processing_info.get("state")
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                # Step 1: Get user profile
+                print("💼 Fetching LinkedIn profile...")
+                profile_response = await client.get(
+                    "https://api.linkedin.com/v2/userinfo",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "X-Restli-Protocol-Version": "2.0.0"
+                    }
+                )
                 
-                if state == "succeeded":
-                    print("✅ Video processing completed")
-                    return
-                elif state == "failed":
-                    print("❌ Video processing failed")
-                    return
-            else:
-                break
+                if profile_response.status_code != 200:
+                    return {
+                        "success": False,
+                        "error": f"Failed to fetch LinkedIn profile: {profile_response.status_code} - {profile_response.text}"
+                    }
+                
+                profile = profile_response.json()
+                author_id = f"urn:li:person:{profile['sub']}"
+                print(f"💼 Profile fetched - Author: {author_id}")
+                
+                # Step 2: Prepare post data
+                post_data = {
+                    "author": author_id,
+                    "lifecycleState": "PUBLISHED",
+                    "specificContent": {
+                        "com.linkedin.ugc.ShareContent": {
+                            "shareCommentary": {"text": content},
+                            "shareMediaCategory": "NONE"
+                        }
+                    },
+                    "visibility": {
+                        "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"
+                    }
+                }
+                
+                # Step 3: Handle images if provided
+                if image_urls and len(image_urls) > 0:
+                    print(f"💼 Uploading {len(image_urls)} images to LinkedIn...")
+                    uploaded_assets = []
+                    
+                    for image_url in image_urls:
+                        try:
+                            # Register upload
+                            print(f"💼 Registering upload for: {image_url}")
+                            register_response = await client.post(
+                                "https://api.linkedin.com/v2/assets?action=registerUpload",
+                                headers={
+                                    "Authorization": f"Bearer {access_token}",
+                                    "Content-Type": "application/json",
+                                    "X-Restli-Protocol-Version": "2.0.0"
+                                },
+                                json={
+                                    "registerUploadRequest": {
+                                        "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
+                                        "owner": author_id,
+                                        "serviceRelationships": [{
+                                            "relationshipType": "OWNER",
+                                            "identifier": "urn:li:userGeneratedContent"
+                                        }]
+                                    }
+                                }
+                            )
+                            
+                            register_data = register_response.json()
+                            
+                            if "value" not in register_data or "uploadMechanism" not in register_data["value"]:
+                                print(f"❌ Failed to register upload: {register_data}")
+                                continue
+                            
+                            upload_url = register_data["value"]["uploadMechanism"]["com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"]["uploadUrl"]
+                            asset = register_data["value"]["asset"]
+                            
+                            # Download image
+                            print(f"💼 Fetching image from: {image_url}")
+                            image_data = await SocialService._download_media(image_url)
+                            if not image_data:
+                                continue
+                            
+                            # Upload to LinkedIn
+                            print(f"💼 Uploading image to LinkedIn...")
+                            upload_response = await client.post(
+                                upload_url,
+                                headers={
+                                    "Authorization": f"Bearer {access_token}",
+                                    "Content-Type": "image/jpeg"
+                                },
+                                content=image_data
+                            )
+                            
+                            if upload_response.status_code in [200, 201]:
+                                print(f"✅ Image uploaded: {asset}")
+                                uploaded_assets.append(asset)
+                            else:
+                                print(f"❌ Image upload failed: {upload_response.status_code}")
+                        
+                        except Exception as img_error:
+                            print(f"❌ Failed to upload image {image_url}: {img_error}")
+                            continue
+                    
+                    # Add uploaded images to post
+                    if uploaded_assets:
+                        post_data["specificContent"]["com.linkedin.ugc.ShareContent"]["shareMediaCategory"] = "IMAGE"
+                        post_data["specificContent"]["com.linkedin.ugc.ShareContent"]["media"] = [
+                            {
+                                "status": "READY",
+                                "description": {"text": content[:200]},
+                                "media": asset,
+                                "title": {"text": "Image"}
+                            }
+                            for asset in uploaded_assets
+                        ]
+                        print(f"💼 Added {len(uploaded_assets)} images to post")
+                
+                # Step 4: Post to LinkedIn
+                print("💼 Posting to LinkedIn...")
+                response = await client.post(
+                    "https://api.linkedin.com/v2/ugcPosts",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json",
+                        "X-Restli-Protocol-Version": "2.0.0"
+                    },
+                    json=post_data
+                )
+                
+                print(f"💼 Response status: {response.status_code}")
+                response_text = response.text
+                print(f"💼 Response: {response_text}")
+                
+                if response.status_code in [200, 201]:
+                    try:
+                        result = response.json()
+                        post_id = result.get("id", "")
+                        print(f"✅ LinkedIn post created: {post_id}")
+                        return {
+                            "success": True,
+                            "platform_post_id": post_id,
+                            "url": f"https://www.linkedin.com/feed/update/{post_id}/"
+                        }
+                    except:
+                        # Sometimes LinkedIn returns empty body on success
+                        return {
+                            "success": True,
+                            "platform_post_id": "success",
+                            "url": "https://www.linkedin.com/feed/"
+                        }
+                else:
+                    return {
+                        "success": False,
+                        "error": f"LinkedIn API error: {response.status_code} - {response_text}"
+                    }
+                    
+        except Exception as e:
+            print(f"❌ LinkedIn post exception: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "error": str(e)}
     
     # ==================== FACEBOOK ====================
     
