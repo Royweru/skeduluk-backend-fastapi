@@ -3,7 +3,7 @@ import httpx
 import json
 from typing import Dict, List, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime  
+from datetime import datetime
 import asyncio
 import mimetypes
 from pathlib import Path
@@ -15,9 +15,10 @@ from .. import models, crud
 from ..config import settings
 from .oauth_service import OAuthService
 
+
 class SocialService:
     """Enhanced social media posting service"""
-    
+
     @staticmethod
     async def ensure_valid_token(connection: models.SocialConnection, db: AsyncSession) -> str:
         """Ensure token is valid, refresh if needed"""
@@ -25,10 +26,11 @@ class SocialService:
             print(f"🔄 Token expired for {connection.platform}, refreshing...")
             result = await OAuthService.refresh_access_token(connection, db)
             if not result:
-                raise Exception(f"Failed to refresh token for {connection.platform}")
+                raise Exception(
+                    f"Failed to refresh token for {connection.platform}")
             return result["access_token"]
         return connection.access_token
-    
+
     @staticmethod
     async def publish_to_platform(
         connection: models.SocialConnection,
@@ -39,13 +41,13 @@ class SocialService:
     ) -> Dict[str, Any]:
         """Publish content to a specific social platform"""
         platform = connection.platform.upper()
-        
+
         # Ensure valid token
         if db:
             access_token = await SocialService.ensure_valid_token(connection, db)
         else:
             access_token = connection.access_token
-        
+
         if platform == "TWITTER":
             return await SocialService._post_to_twitter(access_token, content, image_urls, video_urls)
         elif platform == "FACEBOOK":
@@ -58,7 +60,7 @@ class SocialService:
             return await SocialService._post_to_youtube(access_token, content, video_urls)
         else:
             return {"success": False, "error": f"Unsupported platform: {platform}"}
-    
+
     @staticmethod
     async def _download_media(url: str) -> Optional[bytes]:
         """Download media file from URL"""
@@ -71,9 +73,9 @@ class SocialService:
         except Exception as e:
             print(f"Error downloading media: {e}")
             return None
-    
+
     # ==================== TWITTER/X (FIXED) ====================
-    
+
     @staticmethod
     async def _post_to_twitter(
         access_token: str,
@@ -92,22 +94,23 @@ class SocialService:
                     "success": False,
                     "error": "Invalid Twitter token format. Expected 'oauth_token:oauth_secret'"
                 }
-            
+
             oauth_token, oauth_token_secret = access_token.split(':', 1)
-            
-            print(f"🐦 Twitter OAuth 1.0a - Token length: {len(oauth_token)}, Secret length: {len(oauth_token_secret)}")
-            
+
+            print(
+                f"🐦 Twitter OAuth 1.0a - Token length: {len(oauth_token)}, Secret length: {len(oauth_token_secret)}")
+
             # ✅ Create OAuth1Session (synchronous library, but we'll use it)
             twitter = OAuth1Session(
-                client_key=settings.X_API_KEY,
-                client_secret=settings.X_API_SECRET,
+                client_key=settings.TWITTER_API_KEY,
+                client_secret=settings.TWITTER_API_SECRET,
                 resource_owner_key=oauth_token,
                 resource_owner_secret=oauth_token_secret
             )
-            
+
             tweet_data = {"text": content}
             media_ids = []
-            
+
             # Handle images
             if image_urls:
                 for image_url in image_urls[:4]:  # Twitter max 4 images
@@ -116,23 +119,23 @@ class SocialService:
                     )
                     if media_id:
                         media_ids.append(media_id)
-            
+
             if media_ids:
                 tweet_data["media"] = {"media_ids": media_ids}
-            
+
             # Post tweet using OAuth 1.0a
             print(f"🐦 Posting tweet with OAuth 1.0a...")
             response = twitter.post(
                 "https://api.twitter.com/2/tweets",
                 json=tweet_data
             )
-            
+
             print(f"🐦 Twitter response status: {response.status_code}")
-            
+
             if response.status_code == 201:
                 data = response.json()
                 tweet_id = data["data"]["id"]
-                
+
                 return {
                     "success": True,
                     "platform_post_id": tweet_id,
@@ -140,18 +143,19 @@ class SocialService:
                 }
             else:
                 error_text = response.text
-                print(f"❌ Twitter post error: {response.status_code} {error_text}")
+                print(
+                    f"❌ Twitter post error: {response.status_code} {error_text}")
                 return {
                     "success": False,
                     "error": f"Twitter API error: {error_text}"
                 }
-                
+
         except Exception as e:
             print(f"❌ Twitter post exception: {e}")
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e)}
-    
+
     @staticmethod
     async def _upload_twitter_media_oauth1(
         twitter_session: OAuth1Session,
@@ -162,29 +166,29 @@ class SocialService:
             media_data = await SocialService._download_media(media_url)
             if not media_data:
                 return None
-            
+
             # Determine media type
             content_type = mimetypes.guess_type(media_url)[0] or "image/jpeg"
-            
+
             # Upload using OAuth 1.0a
             files = {"media": ("image.jpg", BytesIO(media_data), content_type)}
             response = twitter_session.post(
                 "https://upload.twitter.com/1.1/media/upload.json",
                 files=files
             )
-            
+
             if response.status_code == 200:
                 return response.json().get("media_id_string")
             else:
                 print(f"❌ Twitter media upload failed: {response.text}")
                 return None
-                
+
         except Exception as e:
             print(f"❌ Twitter media upload error: {e}")
             return None
-    
+
     # ==================== LINKEDIN (NEW) ====================
-    
+
     @staticmethod
     async def _post_to_linkedin(
         access_token: str,
@@ -197,7 +201,7 @@ class SocialService:
         Based on your working TypeScript implementation
         """
         print("💼 Starting LinkedIn post")
-        
+
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 # Step 1: Get user profile
@@ -209,17 +213,17 @@ class SocialService:
                         "X-Restli-Protocol-Version": "2.0.0"
                     }
                 )
-                
+
                 if profile_response.status_code != 200:
                     return {
                         "success": False,
                         "error": f"Failed to fetch LinkedIn profile: {profile_response.status_code} - {profile_response.text}"
                     }
-                
+
                 profile = profile_response.json()
                 author_id = f"urn:li:person:{profile['sub']}"
                 print(f"💼 Profile fetched - Author: {author_id}")
-                
+
                 # Step 2: Prepare post data
                 post_data = {
                     "author": author_id,
@@ -234,12 +238,13 @@ class SocialService:
                         "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"
                     }
                 }
-                
+
                 # Step 3: Handle images if provided
                 if image_urls and len(image_urls) > 0:
-                    print(f"💼 Uploading {len(image_urls)} images to LinkedIn...")
+                    print(
+                        f"💼 Uploading {len(image_urls)} images to LinkedIn...")
                     uploaded_assets = []
-                    
+
                     for image_url in image_urls:
                         try:
                             # Register upload
@@ -262,22 +267,24 @@ class SocialService:
                                     }
                                 }
                             )
-                            
+
                             register_data = register_response.json()
-                            
+
                             if "value" not in register_data or "uploadMechanism" not in register_data["value"]:
-                                print(f"❌ Failed to register upload: {register_data}")
+                                print(
+                                    f"❌ Failed to register upload: {register_data}")
                                 continue
-                            
-                            upload_url = register_data["value"]["uploadMechanism"]["com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"]["uploadUrl"]
+
+                            upload_url = register_data["value"]["uploadMechanism"][
+                                "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"]["uploadUrl"]
                             asset = register_data["value"]["asset"]
-                            
+
                             # Download image
                             print(f"💼 Fetching image from: {image_url}")
                             image_data = await SocialService._download_media(image_url)
                             if not image_data:
                                 continue
-                            
+
                             # Upload to LinkedIn
                             print(f"💼 Uploading image to LinkedIn...")
                             upload_response = await client.post(
@@ -288,17 +295,19 @@ class SocialService:
                                 },
                                 content=image_data
                             )
-                            
+
                             if upload_response.status_code in [200, 201]:
                                 print(f"✅ Image uploaded: {asset}")
                                 uploaded_assets.append(asset)
                             else:
-                                print(f"❌ Image upload failed: {upload_response.status_code}")
-                        
+                                print(
+                                    f"❌ Image upload failed: {upload_response.status_code}")
+
                         except Exception as img_error:
-                            print(f"❌ Failed to upload image {image_url}: {img_error}")
+                            print(
+                                f"❌ Failed to upload image {image_url}: {img_error}")
                             continue
-                    
+
                     # Add uploaded images to post
                     if uploaded_assets:
                         post_data["specificContent"]["com.linkedin.ugc.ShareContent"]["shareMediaCategory"] = "IMAGE"
@@ -312,7 +321,7 @@ class SocialService:
                             for asset in uploaded_assets
                         ]
                         print(f"💼 Added {len(uploaded_assets)} images to post")
-                
+
                 # Step 4: Post to LinkedIn
                 print("💼 Posting to LinkedIn...")
                 response = await client.post(
@@ -324,11 +333,11 @@ class SocialService:
                     },
                     json=post_data
                 )
-                
+
                 print(f"💼 Response status: {response.status_code}")
                 response_text = response.text
                 print(f"💼 Response: {response_text}")
-                
+
                 if response.status_code in [200, 201]:
                     try:
                         result = response.json()
@@ -351,15 +360,15 @@ class SocialService:
                         "success": False,
                         "error": f"LinkedIn API error: {response.status_code} - {response_text}"
                     }
-                    
+
         except Exception as e:
             print(f"❌ LinkedIn post exception: {e}")
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e)}
-    
+
     # ==================== FACEBOOK ====================
-    
+
     @staticmethod
     async def _post_to_facebook(
         access_token: str,
@@ -372,40 +381,41 @@ class SocialService:
                 # Get user's pages
                 pages_url = f"https://graph.facebook.com/v20.0/me/accounts?access_token={access_token}"
                 pages_response = await client.get(pages_url)
-                
+
                 if pages_response.status_code != 200:
                     return {
                         "success": False,
                         "error": f"Failed to get pages: {pages_response.text}"
                     }
-                
+
                 pages_data = pages_response.json()
                 if not pages_data.get("data"):
                     return {"success": False, "error": "No Facebook pages found"}
-                
+
                 # Use first page
                 page = pages_data["data"][0]
                 page_id = page["id"]
                 page_token = page["access_token"]
-                
+
                 # Handle video
                 if video_urls:
                     video_url = video_urls[0]
                     video_data = await SocialService._download_media(video_url)
-                    
+
                     if video_data:
-                        files = {"source": ("video.mp4", video_data, "video/mp4")}
+                        files = {"source": (
+                            "video.mp4", video_data, "video/mp4")}
                         post_data = {
                             "description": content,
                             "access_token": page_token
                         }
-                        
+
                         response = await client.post(
                             f"https://graph-video.facebook.com/v20.0/{page_id}/videos",
                             data=post_data,
                             files=files
                         )
-                        
+
                         if response.status_code == 200:
                             result = response.json()
                             post_id = result.get("id")
@@ -419,13 +429,13 @@ class SocialService:
                                 "success": False,
                                 "error": f"Video upload failed: {response.text}"
                             }
-                
+
                 # Handle images or text
                 post_data = {
                     "message": content,
                     "access_token": page_token
                 }
-                
+
                 if image_urls:
                     # Single image
                     if len(image_urls) == 1:
@@ -438,9 +448,9 @@ class SocialService:
                 else:
                     # Text only
                     post_url = f"https://graph.facebook.com/v20.0/{page_id}/feed"
-                
+
                 response = await client.post(post_url, data=post_data)
-                
+
                 if response.status_code == 200:
                     result = response.json()
                     post_id = result.get("id") or result.get("post_id")
@@ -454,13 +464,13 @@ class SocialService:
                         "success": False,
                         "error": f"Facebook post failed: {response.text}"
                     }
-                    
+
         except Exception as e:
             print(f"❌ Facebook post error: {e}")
             return {"success": False, "error": str(e)}
-    
+
     # ==================== INSTAGRAM ====================
-    
+
     @staticmethod
     async def _post_to_instagram(
         access_token: str,
@@ -473,37 +483,38 @@ class SocialService:
                 # Get Facebook pages
                 pages_url = f"https://graph.facebook.com/v20.0/me/accounts?access_token={access_token}"
                 pages_response = await client.get(pages_url)
-                
+
                 if pages_response.status_code != 200:
                     return {"success": False, "error": "Failed to get pages"}
-                
+
                 pages_data = pages_response.json()
                 if not pages_data.get("data"):
                     return {"success": False, "error": "No Facebook pages found"}
-                
+
                 page = pages_data["data"][0]
                 page_id = page["id"]
                 page_token = page["access_token"]
-                
+
                 # Get Instagram Business Account
                 ig_url = f"https://graph.facebook.com/v20.0/{page_id}?fields=instagram_business_account&access_token={page_token}"
                 ig_response = await client.get(ig_url)
-                
+
                 if ig_response.status_code != 200:
                     return {"success": False, "error": "Instagram account not found"}
-                
+
                 ig_data = ig_response.json()
-                ig_account_id = ig_data.get("instagram_business_account", {}).get("id")
-                
+                ig_account_id = ig_data.get(
+                    "instagram_business_account", {}).get("id")
+
                 if not ig_account_id:
                     return {"success": False, "error": "Instagram Business Account not connected"}
-                
+
                 # Create media container
                 container_data = {
                     "caption": content,
                     "access_token": page_token
                 }
-                
+
                 if video_urls:
                     # Instagram Reel
                     container_data["media_type"] = "REELS"
@@ -517,32 +528,32 @@ class SocialService:
                         container_data["image_url"] = image_urls[0]
                 else:
                     return {"success": False, "error": "Instagram requires media"}
-                
+
                 # Create container
                 container_url = f"https://graph.facebook.com/v20.0/{ig_account_id}/media"
                 container_response = await client.post(container_url, data=container_data)
-                
+
                 if container_response.status_code != 200:
                     return {
                         "success": False,
                         "error": f"Container creation failed: {container_response.text}"
                     }
-                
+
                 container_id = container_response.json()["id"]
-                
+
                 # Wait for container to be ready (videos need processing)
                 if video_urls:
                     await asyncio.sleep(30)  # Wait for video processing
-                
+
                 # Publish container
                 publish_data = {
                     "creation_id": container_id,
                     "access_token": page_token
                 }
-                
+
                 publish_url = f"https://graph.facebook.com/v20.0/{ig_account_id}/media_publish"
                 publish_response = await client.post(publish_url, data=publish_data)
-                
+
                 if publish_response.status_code == 200:
                     result = publish_response.json()
                     post_id = result["id"]
@@ -556,30 +567,30 @@ class SocialService:
                         "success": False,
                         "error": f"Publish failed: {publish_response.text}"
                     }
-                    
+
         except Exception as e:
             print(f"❌ Instagram post error: {e}")
             return {"success": False, "error": str(e)}
-    
+
     # ==================== YOUTUBE ====================
-    
+
     @staticmethod
     async def _post_to_youtube(
         access_token: str,
         content: str,
         video_urls: List[str] = None
     ) -> Dict[str, Any]:
-      
+
         if not video_urls:
             return {"success": False, "error": "YouTube requires a video"}
-        
+
         try:
             video_url = video_urls[0]
             video_data = await SocialService._download_media(video_url)
-            
+
             if not video_data:
                 return {"success": False, "error": "Failed to download video"}
-            
+
             # Prepare video metadata
             metadata = {
                 "snippet": {
@@ -592,16 +603,16 @@ class SocialService:
                     "selfDeclaredMadeForKids": False
                 }
             }
-            
+
             headers = {
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json"
             }
-            
+
             async with httpx.AsyncClient(timeout=300.0) as client:
                 # Upload video
                 files = {"video": ("video.mp4", video_data, "video/mp4")}
-                
+
                 response = await client.post(
                     "https://www.googleapis.com/upload/youtube/v3/videos",
                     params={
@@ -612,7 +623,7 @@ class SocialService:
                     data={"resource": str(metadata)},
                     files=files
                 )
-                
+
                 if response.status_code in [200, 201]:
                     data = response.json()
                     video_id = data.get("id")
@@ -626,7 +637,7 @@ class SocialService:
                         "success": False,
                         "error": f"YouTube upload failed: {response.text}"
                     }
-                    
+
         except Exception as e:
             print(f"❌ YouTube upload error: {e}")
             return {"success": False, "error": str(e)}
