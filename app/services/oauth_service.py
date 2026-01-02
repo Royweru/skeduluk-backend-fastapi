@@ -647,6 +647,72 @@ class OAuthService:
             )
             db.add(connection)
         
+        # ✅ AUTO-SELECT FACEBOOK PAGE
+        if platform.lower() == "facebook":
+            print(f"🔵 Facebook connection detected - fetching pages...")
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    pages_response = await client.get(
+                        "https://graph.facebook.com/v20.0/me/accounts",
+                        params={
+                            "access_token": access_token,
+                            "fields": "id,name,category,access_token,picture"
+                        }
+                    )
+                    
+                    if pages_response.status_code == 200:
+                        pages_data = pages_response.json()
+                        pages = pages_data.get("data", [])
+                        
+                        if pages:
+                            # Auto-select first page
+                            first_page = pages[0]
+                            
+                            connection.facebook_page_id = first_page["id"]
+                            connection.facebook_page_name = first_page["name"]
+                            connection.facebook_page_access_token = first_page["access_token"]
+                            connection.facebook_page_category = first_page.get("category", "Unknown")
+                            
+                            # Get page picture URL
+                            picture_data = first_page.get("picture", {})
+                            if isinstance(picture_data, dict):
+                                picture_url = picture_data.get("data", {}).get("url")
+                            else:
+                                picture_url = None
+                            connection.facebook_page_picture = picture_url
+                            
+                            print(f"✅ Auto-selected Facebook Page: {first_page['name']} (ID: {first_page['id']})")
+                            print(f"   Category: {first_page.get('category', 'Unknown')}")
+                            print(f"   Total pages available: {len(pages)}")
+                            
+                            if len(pages) > 1:
+                                print(f"   ℹ️  User has {len(pages)} pages. They can change selection in settings.")
+                        else:
+                            print(f"⚠️  No Facebook Pages found for this user.")
+                            print(f"   User needs to create a Facebook Page to post via API.")
+                            # Clear any previous page selection
+                            connection.facebook_page_id = None
+                            connection.facebook_page_name = None
+                            connection.facebook_page_access_token = None
+                            connection.facebook_page_category = None
+                            connection.facebook_page_picture = None
+                    else:
+                        print(f"⚠️  Failed to fetch Facebook pages: {pages_response.status_code}")
+                        print(f"   Response: {pages_response.text}")
+                        # Don't fail the connection, just log the issue
+                        
+            except httpx.TimeoutException:
+                print(f"⚠️  Timeout while fetching Facebook pages. Connection saved but no page selected.")
+            except httpx.HTTPError as e:
+                print(f"⚠️  HTTP error while fetching Facebook pages: {e}")
+            except Exception as e:
+                print(f"⚠️  Unexpected error while fetching Facebook pages: {e}")
+                import traceback
+                traceback.print_exc()
+                # Don't fail the connection - user can select page later
+        
+        # Final commit and refresh
         await db.commit()
         await db.refresh(connection)
+        
         return connection

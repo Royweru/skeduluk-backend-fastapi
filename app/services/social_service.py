@@ -370,41 +370,36 @@ class SocialService:
     # ==================== FACEBOOK ====================
 
     @staticmethod
-    async def _post_to_facebook(
-        access_token: str,
+    async def _post_to_facebook_with_connection(
+        connection: models.SocialConnection,
         content: str,
         image_urls: List[str] = None,
-        video_urls: List[str] = None
+        video_urls: List[str] = None,
+        db: AsyncSession = None
     ) -> Dict[str, Any]:
+        """Post to Facebook using selected page from database"""
         try:
+            # ✅ Check if user has selected a page
+            if not connection.facebook_page_id or not connection.facebook_page_access_token:
+                return {
+                    "success": False,
+                    "error": "No Facebook Page selected. Please select a page in Settings."
+                }
+            
+            page_id = connection.facebook_page_id
+            page_token = connection.facebook_page_access_token
+            page_name = connection.facebook_page_name
+            
+            print(f"📘 Posting to Facebook Page: {page_name} (ID: {page_id})")
+            
             async with httpx.AsyncClient(timeout=90.0) as client:
-                # Get user's pages
-                pages_url = f"https://graph.facebook.com/v20.0/me/accounts?access_token={access_token}"
-                pages_response = await client.get(pages_url)
-
-                if pages_response.status_code != 200:
-                    return {
-                        "success": False,
-                        "error": f"Failed to get pages: {pages_response.text}"
-                    }
-
-                pages_data = pages_response.json()
-                if not pages_data.get("data"):
-                    return {"success": False, "error": "No Facebook pages found"}
-
-                # Use first page
-                page = pages_data["data"][0]
-                page_id = page["id"]
-                page_token = page["access_token"]
-
-                # Handle video
+                # Handle video posts
                 if video_urls:
                     video_url = video_urls[0]
                     video_data = await SocialService._download_media(video_url)
 
                     if video_data:
-                        files = {"source": (
-                            "video.mp4", video_data, "video/mp4")}
+                        files = {"source": ("video.mp4", video_data, "video/mp4")}
                         post_data = {
                             "description": content,
                             "access_token": page_token
@@ -422,7 +417,7 @@ class SocialService:
                             return {
                                 "success": True,
                                 "platform_post_id": post_id,
-                                "url": f"https://www.facebook.com/{post_id}"
+                                "url": f"https://www.facebook.com/{page_id}/posts/{post_id}"
                             }
                         else:
                             return {
@@ -430,23 +425,18 @@ class SocialService:
                                 "error": f"Video upload failed: {response.text}"
                             }
 
-                # Handle images or text
+                # Handle images or text posts
                 post_data = {
                     "message": content,
                     "access_token": page_token
                 }
 
-                if image_urls:
-                    # Single image
-                    if len(image_urls) == 1:
-                        post_data["url"] = image_urls[0]
-                        post_url = f"https://graph.facebook.com/v20.0/{page_id}/photos"
-                    else:
-                        # Multiple images - use first for simplicity
-                        post_data["url"] = image_urls[0]
-                        post_url = f"https://graph.facebook.com/v20.0/{page_id}/photos"
+                if image_urls and len(image_urls) > 0:
+                    # Post with image
+                    post_data["url"] = image_urls[0]
+                    post_url = f"https://graph.facebook.com/v20.0/{page_id}/photos"
                 else:
-                    # Text only
+                    # Text-only post
                     post_url = f"https://graph.facebook.com/v20.0/{page_id}/feed"
 
                 response = await client.post(post_url, data=post_data)
@@ -454,19 +444,24 @@ class SocialService:
                 if response.status_code == 200:
                     result = response.json()
                     post_id = result.get("id") or result.get("post_id")
+                    
                     return {
                         "success": True,
                         "platform_post_id": post_id,
-                        "url": f"https://www.facebook.com/{post_id}"
+                        "url": f"https://www.facebook.com/{page_name}/posts/{post_id.split('_')[1] if '_' in post_id else post_id}"
                     }
                 else:
+                    error_data = response.json()
+                    error_msg = error_data.get("error", {}).get("message", response.text)
                     return {
                         "success": False,
-                        "error": f"Facebook post failed: {response.text}"
+                        "error": f"Facebook post failed: {error_msg}"
                     }
 
         except Exception as e:
             print(f"❌ Facebook post error: {e}")
+            import traceback
+            traceback.print_exc()
             return {"success": False, "error": str(e)}
 
     # ==================== INSTAGRAM ====================

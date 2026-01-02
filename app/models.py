@@ -63,6 +63,8 @@ class SocialConnection(Base):
     facebook_page_id = Column(String, nullable=True)  # Selected page ID
     facebook_page_name = Column(String, nullable=True)  # Selected page name
     facebook_page_access_token = Column(Text, nullable=True)  # Page-specific token
+    facebook_page_category = Column(String, nullable=True)
+    facebook_page_picture = Column(String, nullable=True)
     
     # Relationships
     user = relationship("User", back_populates="social_connections")
