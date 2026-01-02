@@ -69,7 +69,7 @@ OAUTH_CONFIGS = {
             "auth_type": "rerequest",
         }
     },
-    # ✅ ADD LINKEDIN HERE
+    #  ADD LINKEDIN HERE
     "linkedin": {
         "client_id": settings.LINKEDIN_CLIENT_ID,
         "client_secret": settings.LINKEDIN_CLIENT_SECRET,
@@ -215,7 +215,7 @@ class OAuthService:
             })
             state_payload["pkce_verifier"] = code_verifier
             print(
-                f"✅ PKCE enabled - Verifier length: {len(code_verifier)}, Challenge length: {len(code_challenge)}")
+                f" PKCE enabled - Verifier length: {len(code_verifier)}, Challenge length: {len(code_challenge)}")
 
         # Encode the state payload into a JWT
         state_jwt = jwt.encode(
@@ -242,7 +242,7 @@ class OAuthService:
         print("="*70)
         
         if error:
-            print(f"❌ Error parameter present: {error}")
+            print(f" Error parameter present: {error}")
             return {"success": False, "error": f"Authorization denied: {error}"}
 
         platform = platform.lower()
@@ -264,23 +264,23 @@ class OAuthService:
             user_id = state_payload["user_id"]
             code_verifier = state_payload.get("pkce_verifier")
             
-            print(f"✅ State validated - User ID: {user_id}")
+            print(f" State validated - User ID: {user_id}")
             if code_verifier:
-                print(f"✅ PKCE verifier retrieved (length: {len(code_verifier)})")
+                print(f" PKCE verifier retrieved (length: {len(code_verifier)})")
 
         except JWTError as e:
-            print(f"❌ Invalid state token: {e}")
+            print(f" Invalid state token: {e}")
             return {"success": False, "error": "Invalid or expired connection link. Please try again."}
 
         try:
-            # ✅ FIXED: Build token params based on auth method
+            #  FIXED: Build token params based on auth method
             token_params = {
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": config["redirect_uri"],
             }
             
-            # ✅ FIX: Only add credentials to body if NOT using Basic Auth
+            #  FIX: Only add credentials to body if NOT using Basic Auth
             if config.get("token_auth_method") != "basic":
                 token_params["client_id"] = config["client_id"]
                 token_params["client_secret"] = config["client_secret"]
@@ -290,7 +290,7 @@ class OAuthService:
                 if not code_verifier:
                     return {"success": False, "error": "PKCE verifier missing from state."}
                 token_params["code_verifier"] = code_verifier
-                print(f"✅ Adding PKCE verifier to token request (length: {len(code_verifier)})")
+                print(f" Adding PKCE verifier to token request (length: {len(code_verifier)})")
 
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded",
@@ -300,12 +300,12 @@ class OAuthService:
             # Set up authentication
             auth = None
             if config.get("token_auth_method") == "basic":
-                # ✅ For Basic Auth: credentials in header, NOT body
+                #  For Basic Auth: credentials in header, NOT body
                 auth = (config["client_id"], config["client_secret"])
-                print(f"✅ Using Basic Auth for token exchange (credentials in Authorization header)")
+                print(f" Using Basic Auth for token exchange (credentials in Authorization header)")
                 print(f"   Client ID: {config['client_id'][:15]}...")
             else:
-                print(f"✅ Using body parameters for token exchange")
+                print(f" Using body parameters for token exchange")
 
             print("\n" + "-"*70)
             print("🔄 EXCHANGING CODE FOR TOKEN")
@@ -330,11 +330,11 @@ class OAuthService:
                 
                 if token_response.status_code != 200:
                     error_body = token_response.text
-                    print(f"❌ Token exchange failed!")
+                    print(f" Token exchange failed!")
                     print(f"Status Code: {token_response.status_code}")
                     print(f"Response body: {error_body}")
                     
-                    # ✅ Enhanced debugging
+                    #  Enhanced debugging
                     print(f"\n🔍 DEBUG INFO:")
                     print(f"  Token URL: {config['token_url']}")
                     print(f"  Redirect URI sent: {config['redirect_uri']}")
@@ -359,11 +359,11 @@ class OAuthService:
                 access_token = token_data.get("access_token")
                 
                 if not access_token:
-                    print("❌ No access token in response")
+                    print(" No access token in response")
                     print(f"Response: {token_data}")
                     return {"success": False, "error": "No access token received"}
                 
-                print(f"✅ Access token received (length: {len(access_token)})")
+                print(f" Access token received (length: {len(access_token)})")
                 print(f"Token expires in: {token_data.get('expires_in', 'unknown')} seconds")
                 print(f"Refresh token: {'YES' if token_data.get('refresh_token') else 'NO'}")
 
@@ -381,10 +381,10 @@ class OAuthService:
                 )
                 
                 if not user_info:
-                    print("❌ Failed to get user info")
+                    print(" Failed to get user info")
                     return {"success": False, "error": f"Failed to get user profile from {platform}"}
                 
-                print(f"✅ User info retrieved: {user_info.get('username') or user_info.get('name')}")
+                print(f" User info retrieved: {user_info.get('username') or user_info.get('name')}")
 
                 # Save connection
                 print("\n💾 Saving connection to database...")
@@ -401,7 +401,7 @@ class OAuthService:
                     platform_email=user_info.get("email")
                 )
                 
-                print(f"✅ Connection saved with ID: {connection.id}")
+                print(f" Connection saved with ID: {connection.id}")
                 print("="*70 + "\n")
                 
                 return {
@@ -411,10 +411,10 @@ class OAuthService:
                 }
                 
         except httpx.TimeoutException:
-            print("❌ Connection timeout")
+            print(" Connection timeout")
             return {"success": False, "error": f"Connection timeout with {platform}"}
         except Exception as e:
-            print(f"❌ Unexpected error: {e}")
+            print(f" Unexpected error: {e}")
             import traceback
             traceback.print_exc()
             return {"success": False, "error": f"An unexpected error occurred: {str(e)[:100]}"}
@@ -437,7 +437,7 @@ class OAuthService:
             
             if response.status_code == 200:
                 data = response.json()
-                print(f"✅ Exchanged for long-lived token (expires in {data.get('expires_in', 'unknown')}s)")
+                print(f" Exchanged for long-lived token (expires in {data.get('expires_in', 'unknown')}s)")
                 return data["access_token"], data
             else:
                 print(f"⚠️ Token exchange failed ({response.status_code}), using short-lived token")
@@ -502,7 +502,7 @@ class OAuthService:
                 print(f"   Response status: {response.status_code}")
                 
                 if response.status_code != 200:
-                    print(f"❌ Token refresh failed")
+                    print(f"Token refresh failed")
                     print(f"   Response body: {response.text}")
                     # Mark connection as inactive so user knows to reconnect
                     connection.is_active = False
@@ -515,7 +515,7 @@ class OAuthService:
                 expires_in = token_data.get("expires_in")
                 
                 if not new_access_token:
-                    print(f"❌ No access_token in response")
+                    print(f" No access_token in response")
                     return None
                 
                 # Update connection
@@ -530,7 +530,7 @@ class OAuthService:
                 connection.is_active = True
                 await db.commit()
                 
-                print(f"✅ Token refreshed successfully!")
+                print(f" Token refreshed successfully!")
                 print(f"   New expiry: {connection.token_expires_at}")
                 print(f"   Days until expiry: {(connection.token_expires_at - datetime.utcnow()).days}")
                 
@@ -541,7 +541,7 @@ class OAuthService:
                 }
                 
         except Exception as e:
-            print(f"❌ Token refresh exception: {e}")
+            print(f" Token refresh exception: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -556,7 +556,7 @@ class OAuthService:
             response = await client.get(user_info_url, headers=headers)
             
             if response.status_code != 200:
-                print(f"❌ User info error: {response.status_code}")
+                print(f" User info error: {response.status_code}")
                 print(f"Response: {response.text}")
                 return None
 
@@ -593,7 +593,7 @@ class OAuthService:
 
                 
         except Exception as e:
-            print(f"❌ Error getting user info: {e}")
+            print(f" Error getting user info: {e}")
             return None
         
         return None
@@ -647,7 +647,7 @@ class OAuthService:
             )
             db.add(connection)
         
-        # ✅ AUTO-SELECT FACEBOOK PAGE
+        #  AUTO-SELECT FACEBOOK PAGE
         if platform.lower() == "facebook":
             print(f"🔵 Facebook connection detected - fetching pages...")
             try:
@@ -681,7 +681,7 @@ class OAuthService:
                                 picture_url = None
                             connection.facebook_page_picture = picture_url
                             
-                            print(f"✅ Auto-selected Facebook Page: {first_page['name']} (ID: {first_page['id']})")
+                            print(f" Auto-selected Facebook Page: {first_page['name']} (ID: {first_page['id']})")
                             print(f"   Category: {first_page.get('category', 'Unknown')}")
                             print(f"   Total pages available: {len(pages)}")
                             
