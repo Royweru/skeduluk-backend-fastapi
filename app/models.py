@@ -38,8 +38,8 @@ class User(Base):
     # Relationships - FIXED: Added missing relationships
     social_connections = relationship("SocialConnection", back_populates="user")
     posts = relationship("Post", back_populates="user")
-    post_templates = relationship("PostTemplate", back_populates="user")  # ← ADDED
-    subscriptions = relationship("Subscription", back_populates="user")  # ← ADDED
+    post_templates = relationship("PostTemplate", back_populates="user")  
+    subscriptions = relationship("Subscription", back_populates="user")  
 
 class SocialConnection(Base):
     __tablename__ = "social_connections"
@@ -58,6 +58,11 @@ class SocialConnection(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Facebook specific fields
+    facebook_page_id = Column(String, nullable=True)  # Selected page ID
+    facebook_page_name = Column(String, nullable=True)  # Selected page name
+    facebook_page_access_token = Column(Text, nullable=True)  # Page-specific token
     
     # Relationships
     user = relationship("User", back_populates="social_connections")
@@ -82,7 +87,7 @@ class Post(Base):
     
     # Relationships - FIXED: Added missing post_results relationship
     user = relationship("User", back_populates="posts")
-    post_results = relationship("PostResult", back_populates="post", cascade="all, delete-orphan")  # ← ADDED
+    post_results = relationship("PostResult", back_populates="post", cascade="all, delete-orphan")  
 
 class PostResult(Base):
     __tablename__ = "post_results"
