@@ -583,6 +583,14 @@ class OAuthService:
                     "name": data.get("name"),
                     "email": data.get("email")
                 }
+            elif platform == "linkedin":
+                return {
+                    "user_id": data.get("sub"),
+                    "username": data.get("email"),
+                    "name": data.get("name"),
+                    "email": data.get("email")
+                }
+
                 
         except Exception as e:
             print(f"❌ Error getting user info: {e}")
