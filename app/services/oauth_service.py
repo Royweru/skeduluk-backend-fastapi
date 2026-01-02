@@ -20,6 +20,8 @@ BASE_URL = settings.BACKEND_URL.rstrip("/")
 CALLBACK_PATH = "/auth/oauth/callback"
 
 # 🔧 IMPROVED: Better OAuth configurations with comments
+# app/services/oauth_service.py
+
 OAUTH_CONFIGS = {
     "twitter": {
         "client_id": settings.TWITTER_CLIENT_ID,
@@ -28,11 +30,10 @@ OAUTH_CONFIGS = {
         "token_url": "https://api.twitter.com/2/oauth2/token",
         "revoke_url": "https://api.twitter.com/2/oauth2/revoke",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/twitter",
-        # ✅ Twitter scopes - space separated (NOT comma separated)
         "scope": "tweet.read tweet.write users.read offline.access",
         "user_info_url": "https://api.twitter.com/2/users/me?user.fields=id,name,username,profile_image_url",
-        "uses_pkce": True,  # Twitter REQUIRES PKCE
-        "token_auth_method": "basic",  # Twitter uses Basic Auth for token exchange
+        "uses_pkce": True,
+        "token_auth_method": "basic",
         "response_type": "code"
     },
     "facebook": {
@@ -41,16 +42,14 @@ OAUTH_CONFIGS = {
         "auth_url": "https://www.facebook.com/v20.0/dialog/oauth",
         "token_url": "https://graph.facebook.com/v20.0/oauth/access_token",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/facebook",
-        # ✅ Minimal scopes that work in Development Mode
-        # Note: pages_show_list needs to be approved for production
         "scope": "public_profile,email,pages_show_list",
         "user_info_url": "https://graph.facebook.com/v20.0/me?fields=id,name,email,picture",
         "uses_pkce": False,
         "token_auth_method": "body",
         "response_type": "code",
-        "exchange_token": True,  # Facebook needs long-lived token
+        "exchange_token": True,
         "auth_params": {
-            "auth_type": "rerequest",  # Re-request declined permissions
+            "auth_type": "rerequest",
         }
     },
     "instagram": {
@@ -69,6 +68,22 @@ OAUTH_CONFIGS = {
         "auth_params": {
             "auth_type": "rerequest",
         }
+    },
+    # ✅ ADD LINKEDIN HERE
+    "linkedin": {
+        "client_id": settings.LINKEDIN_CLIENT_ID,
+        "client_secret": settings.LINKEDIN_CLIENT_SECRET,
+        "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
+        "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
+        "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/linkedin",
+        # Scopes: openid, profile, email for user info + w_member_social for posting
+        "scope": "openid profile email w_member_social",
+        "user_info_url": "https://api.linkedin.com/v2/userinfo",
+        "uses_pkce": False,
+        "token_auth_method": "body",  # LinkedIn uses body params, not Basic Auth
+        "response_type": "code",
+        "platform_display_name": "LinkedIn",
+        "auth_params": {}
     },
     "youtube": {
         "client_id": settings.GOOGLE_CLIENT_ID,
