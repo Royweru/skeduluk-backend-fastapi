@@ -446,9 +446,16 @@ class OAuthService:
             return None
         
         if platform not in OAUTH_CONFIGS:
+            print(f"⚠️ Platform {platform} not in OAUTH_CONFIGS")
             return None
         
         config = OAUTH_CONFIGS[platform]
+        
+        # 🔍 DEBUG: Print what we're about to do
+        print(f"🔄 Attempting token refresh for {platform}")
+        print(f"   Refresh token length: {len(refresh_token)}")
+        print(f"   Token URL: {config['token_url']}")
+        print(f"   Client ID: {config['client_id'][:20]}...")
         
         try:
             refresh_params = {
@@ -477,8 +484,12 @@ class OAuthService:
                     auth=auth
                 )
                 
+                print(f"   Response status: {response.status_code}")
+                
                 if response.status_code != 200:
-                    print(f"❌ Token refresh failed: {response.status_code}")
+                    print(f"❌ Token refresh failed")
+                    print(f"   Response body: {response.text}")
+                    # Mark connection as inactive so user knows to reconnect
                     connection.is_active = False
                     await db.commit()
                     return None
@@ -489,6 +500,7 @@ class OAuthService:
                 expires_in = token_data.get("expires_in")
                 
                 if not new_access_token:
+                    print(f"❌ No access_token in response")
                     return None
                 
                 # Update connection
@@ -499,10 +511,13 @@ class OAuthService:
                     if expires_in else None
                 )
                 connection.updated_at = datetime.utcnow()
+                connection.last_synced = datetime.utcnow()
                 connection.is_active = True
                 await db.commit()
                 
-                print(f"✅ Token refreshed for {platform}")
+                print(f"✅ Token refreshed successfully!")
+                print(f"   New expiry: {connection.token_expires_at}")
+                print(f"   Days until expiry: {(connection.token_expires_at - datetime.utcnow()).days}")
                 
                 return {
                     "access_token": new_access_token,
@@ -511,7 +526,9 @@ class OAuthService:
                 }
                 
         except Exception as e:
-            print(f"❌ Token refresh error: {e}")
+            print(f"❌ Token refresh exception: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     @classmethod

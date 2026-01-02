@@ -6,3 +6,15 @@ docker-compose up --build
 
 # Or run in background
 docker-compose up --build -d
+
+# Stop all containers
+docker-compose down
+
+# Rebuild with new dependencies
+docker-compose build
+
+# Start everything again
+docker-compose up -d
+
+# Check logs
+docker-compose logs -f celery_worker
