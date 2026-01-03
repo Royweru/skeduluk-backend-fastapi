@@ -3,7 +3,7 @@ import cloudinary
 import cloudinary.uploader
 from typing import Optional, Dict, Any
 from fastapi import UploadFile, HTTPException
-from ..config import settings
+from ...config import settings
 
 class CloudinaryService:
     """Service for handling media uploads to Cloudinary"""
