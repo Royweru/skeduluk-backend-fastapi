@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     
+    #s3 storage 
+    USE_S3_STORAGE:bool = False
+    
+    #Local storage dir path
+    UPLOAD_DIR:str = "uploads/"
+    
     # Application URLs
     FRONTEND_URL: str = "https://skeduluk-social.vercel.app"
     BACKEND_URL: str = "https://skeduluk-fastapi.onrender.com"

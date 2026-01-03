@@ -76,7 +76,6 @@ OAUTH_CONFIGS = {
         "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
         "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/linkedin",
-        # Scopes: openid, profile, email for user info + w_member_social for posting
         "scope": "openid profile email w_member_social",
         "user_info_url": "https://api.linkedin.com/v2/userinfo",
         "uses_pkce": False,
@@ -86,21 +85,21 @@ OAUTH_CONFIGS = {
         "auth_params": {}
     },
     "youtube": {
-        "client_id": settings.GOOGLE_CLIENT_ID,
-        "client_secret": settings.GOOGLE_CLIENT_SECRET,
-        "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
-        "token_url": "https://oauth2.googleapis.com/token",
-        "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/youtube",
-        "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
-        "user_info_url": "https://www.googleapis.com/oauth2/v3/userinfo",
-        "uses_pkce": False,
-        "token_auth_method": "body",
-        "response_type": "code",
-        "auth_params": {
-            "access_type": "offline",
-            "prompt": "consent"
-        },
-        "platform_display_name": "YouTube"
+    "client_id": settings.GOOGLE_CLIENT_ID,
+    "client_secret": settings.GOOGLE_CLIENT_SECRET,
+    "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+    "token_url": "https://oauth2.googleapis.com/token",
+    "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/youtube",
+    "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
+    "user_info_url": "https://www.googleapis.com/oauth2/v3/userinfo",
+    "uses_pkce": False,
+    "token_auth_method": "body",
+    "response_type": "code",
+    "auth_params": {
+        "access_type": "offline",
+        "prompt": "consent"
+    },
+    "platform_display_name": "YouTube"
     }
 }
 

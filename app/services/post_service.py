@@ -142,18 +142,8 @@ class PostService:
                 detail=f"{file_type_name} type '{file.content_type}' not allowed. Allowed types: {', '.join(allowed_types)}"
             )
         
-        # Check file size
-        file.file.seek(0, 2)  # Seek to end
-        file_size = file.file.tell()
-        file.file.seek(0)  # Reset to beginning
+        # Skip the check file size cause will do this for a specific plaform later
         
-        if file_size > max_size:
-            max_size_mb = max_size / (1024 * 1024)
-            file_size_mb = file_size / (1024 * 1024)
-            raise HTTPException(
-                status_code=400,
-                detail=f"{file_type_name} size {file_size_mb:.2f}MB exceeds maximum {max_size_mb:.2f}MB"
-            )
         
         return True
     
@@ -193,7 +183,7 @@ class PostService:
             allowed_types = PostService.ALLOWED_IMAGE_TYPES if is_image else PostService.ALLOWED_VIDEO_TYPES
             file_type_name = "Image" if is_image else "Video"
             
-            await PostService.validate_media_file(file, allowed_types, max_size, file_type_name)
+            await PostService.validate_media_file(file, allowed_types, file_type_name)
             
             # Validate against platform limits
             if platform:
@@ -203,7 +193,7 @@ class PostService:
                         status_code=400,
                         detail=f"{platform} does not support video uploads"
                     )
-                if is_video and file_size > limits.get('max_video_size', PostService.MAX_VIDEO_SIZE):
+                if is_video and file_size > limits.get('max_video_size'):
                     max_mb = limits.get('max_video_size', PostService.MAX_VIDEO_SIZE) / (1024 * 1024)
                     raise HTTPException(
                         status_code=400,
