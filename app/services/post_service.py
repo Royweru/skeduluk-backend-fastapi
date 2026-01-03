@@ -15,7 +15,7 @@ import mimetypes
 from .. import crud, models, schemas
 from ..config import settings
 from ..services.transcription_service import TranscriptionService
-from ..services.cloudinary_service import CloudinaryService  # ✅ NEW IMPORT
+from ..services.storage.cloudinary import CloudinaryService  # ✅ NEW IMPORT
 
 class PostService:
     # Allowed file types
