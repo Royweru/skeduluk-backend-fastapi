@@ -580,6 +580,8 @@ class SocialService:
             return {"success": False, "error": "YouTube requires a video"}
 
         try:
+            # DEBUG: Log the URL we're trying to download
+            print(f"🎬 Attempting to download video from: {video_url}")
             video_url = video_urls[0]
             video_data = await SocialService._download_media(video_url)
 

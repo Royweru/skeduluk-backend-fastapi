@@ -1,11 +1,19 @@
 # app/main.py
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 from fastapi import FastAPI
+from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import auth, posts, social, users, payments
 from .config import settings
 
 app = FastAPI(title=settings.APP_NAME)
+
+# Creates the uploads directory if it doesn't exist
+Path("uploads").mkdir(exist_ok=True)
+
+# Mount static files - this creates the /uploads endpoint
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Configure CORS - CRITICAL FIX
 app.add_middleware(
