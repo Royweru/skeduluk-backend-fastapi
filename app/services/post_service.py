@@ -15,6 +15,7 @@ import mimetypes
 from .. import crud, models, schemas
 from ..config import settings
 from ..services.transcription_service import TranscriptionService
+from ..services.cloudinary_service import CloudinaryService  # ✅ NEW IMPORT
 
 class PostService:
     # Allowed file types
@@ -33,7 +34,7 @@ class PostService:
     
     # Size limits (in bytes)
     MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
-    MAX_VIDEO_SIZE = 100 * 1024 * 1024  # 100MB
+    MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500MB (Cloudinary free tier supports up to 100MB per file)
     MAX_AUDIO_SIZE = 25 * 1024 * 1024  # 25MB
     
     # Platform-specific limits
@@ -41,38 +42,38 @@ class PostService:
         'twitter': {
             'max_images': 4,
             'max_videos': 1,
-            'video_duration': 140,  # seconds
-            'max_video_size': 512 * 1024 * 1024  # 512MB
+            'video_duration': 140,
+            'max_video_size': 512 * 1024 * 1024
         },
         'facebook': {
             'max_images': 10,
             'max_videos': 1,
             'video_duration': 240,
-            'max_video_size': 4 * 1024 * 1024 * 1024  # 4GB
+            'max_video_size': 4 * 1024 * 1024 * 1024
         },
         'instagram': {
             'max_images': 10,
             'max_videos': 1,
             'video_duration': 60,
-            'max_video_size': 100 * 1024 * 1024  # 100MB
+            'max_video_size': 100 * 1024 * 1024
         },
         'linkedin': {
             'max_images': 9,
             'max_videos': 1,
             'video_duration': 600,
-            'max_video_size': 5 * 1024 * 1024 * 1024  # 5GB
+            'max_video_size': 5 * 1024 * 1024 * 1024
         },
         'tiktok': {
             'max_images': 0,
             'max_videos': 1,
             'video_duration': 180,
-            'max_video_size': 287.6 * 1024 * 1024  # 287.6MB
+            'max_video_size': 287.6 * 1024 * 1024
         },
         'youtube': {
             'max_images': 0,
             'max_videos': 1,
             'video_duration': 3600,
-            'max_video_size': 128 * 1024 * 1024 * 1024  # 128GB
+            'max_video_size': 128 * 1024 * 1024 * 1024
         }
     }
 
@@ -142,9 +143,6 @@ class PostService:
                 detail=f"{file_type_name} type '{file.content_type}' not allowed. Allowed types: {', '.join(allowed_types)}"
             )
         
-        # Skip the check file size cause will do this for a specific plaform later
-        
-        
         return True
     
     @staticmethod
@@ -155,11 +153,15 @@ class PostService:
     ) -> List[Dict[str, str]]:
         """
         Upload media files (images and videos) and return URLs with metadata
+        
+        🆕 Now supports Cloudinary, S3, or local storage
+        
         Returns: [{"url": "...", "type": "image|video", "filename": "...", "size": ...}]
         """
         media_data = []
         
-        # Use local storage for development, S3 for production
+        # ✅ Determine upload method based on config
+        use_cloudinary = getattr(settings, 'USE_CLOUDINARY', False)
         use_s3 = getattr(settings, 'USE_S3_STORAGE', False)
         
         for file in files:
@@ -173,7 +175,7 @@ class PostService:
                     detail=f"Unsupported file type: {file.content_type}. Must be image or video."
                 )
             
-            # Get file size before validation
+            # Get file size
             file.file.seek(0, 2)
             file_size = file.file.tell()
             file.file.seek(0)
@@ -185,47 +187,61 @@ class PostService:
             
             await PostService.validate_media_file(file, allowed_types, file_type_name)
             
-            # Validate against platform limits
-            if platform:
-                limits = PostService.PLATFORM_LIMITS.get(platform.lower(), {})
-                if is_video and limits.get('max_videos', 1) == 0:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"{platform} does not support video uploads"
-                    )
-                if is_video and file_size > limits.get('max_video_size'):
-                    max_mb = limits.get('max_video_size', PostService.MAX_VIDEO_SIZE) / (1024 * 1024)
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"{platform} video size limit is {max_mb:.2f}MB"
-                    )
+            # ✅ UPLOAD USING CLOUDINARY (RECOMMENDED FOR DEV)
+            if use_cloudinary:
+                if is_image:
+                    result = await CloudinaryService.upload_image(file, user_id)
+                else:
+                    result = await CloudinaryService.upload_video(file, user_id)
+                
+                media_data.append({
+                    "url": result["secure_url"],  # ✅ Publicly accessible URL
+                    "type": "video" if is_video else "image",
+                    "filename": file.filename,
+                    "content_type": file.content_type,
+                    "size": file_size,
+                    "public_id": result["public_id"]  # For deletion later
+                })
             
-            # Generate unique filename
-            file_extension = os.path.splitext(file.filename)[1].lower()
-            file_type = 'videos' if is_video else 'images'
-            unique_filename = f"{user_id}/{file_type}/{uuid.uuid4()}{file_extension}"
-            
-            if use_s3:
-                # Upload to S3
+            # Upload to S3 (Production)
+            elif use_s3:
+                file_extension = os.path.splitext(file.filename)[1].lower()
+                file_type = 'videos' if is_video else 'images'
+                unique_filename = f"{user_id}/{file_type}/{uuid.uuid4()}{file_extension}"
+                
                 file_url = await PostService._upload_to_s3(
                     file, 
                     unique_filename,
                     file.content_type
                 )
+                
+                media_data.append({
+                    "url": file_url,
+                    "type": "video" if is_video else "image",
+                    "filename": file.filename,
+                    "content_type": file.content_type,
+                    "size": file_size
+                })
+            
+            # Upload to local storage (Fallback - NOT RECOMMENDED for production)
             else:
-                # Upload to local storage
+                print("⚠️ WARNING: Using local storage. Use Cloudinary or S3 for production!")
+                file_extension = os.path.splitext(file.filename)[1].lower()
+                file_type = 'videos' if is_video else 'images'
+                unique_filename = f"{user_id}/{file_type}/{uuid.uuid4()}{file_extension}"
+                
                 file_url = await PostService._upload_to_local(
                     file, 
                     unique_filename
                 )
-            
-            media_data.append({
-                "url": file_url,
-                "type": "video" if is_video else "image",
-                "filename": file.filename,
-                "content_type": file.content_type,
-                "size": file_size
-            })
+                
+                media_data.append({
+                    "url": file_url,
+                    "type": "video" if is_video else "image",
+                    "filename": file.filename,
+                    "content_type": file.content_type,
+                    "size": file_size
+                })
         
         return media_data
     
@@ -244,21 +260,18 @@ class PostService:
                 region_name=settings.AWS_REGION
             )
             
-            # Reset file pointer
             file.file.seek(0)
             
-            # Upload file
             s3_client.upload_fileobj(
                 file.file,
                 settings.AWS_BUCKET_NAME,
                 filename,
                 ExtraArgs={
                     "ContentType": content_type,
-                    "ACL": "public-read"  # Make files publicly accessible
+                    "ACL": "public-read"
                 }
             )
             
-            # Generate public URL
             file_url = f"https://{settings.AWS_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{filename}"
             return file_url
             
@@ -272,21 +285,19 @@ class PostService:
     async def _upload_to_local(file: UploadFile, filename: str) -> str:
         """Upload file to local storage"""
         try:
-            # Create upload directory if it doesn't exist
             upload_dir = Path(settings.UPLOAD_DIR)
             file_path = upload_dir / filename
             file_path.parent.mkdir(parents=True, exist_ok=True)
             
-            # Reset file pointer
             file.file.seek(0)
             
-            # Save file
             async with aiofiles.open(file_path, 'wb') as out_file:
                 content = await file.read()
                 await out_file.write(content)
             
-            # Generate URL (assuming backend serves files from /uploads)
-            file_url = f"{settings.BACKEND_URL}/uploads/{filename}"
+            # ⚠️ This URL will NOT work from Celery workers or external services
+            LOCAL_URL = 'http://localhost:3000'
+            file_url = f"{LOCAL_URL}/uploads/{filename}"
             return file_url
             
         except Exception as e:
@@ -297,14 +308,10 @@ class PostService:
     
     @staticmethod
     async def upload_images(images: List[UploadFile], user_id: int) -> List[str]:
-        """
-        Upload image files and return URLs (backward compatibility)
-        Returns list of image URLs
-        """
+        """Upload image files and return URLs (backward compatibility)"""
         if not images:
             return []
         
-        # Filter to ensure only images
         image_files = [f for f in images if f.content_type in PostService.ALLOWED_IMAGE_TYPES]
         
         if not image_files:
@@ -315,14 +322,10 @@ class PostService:
     
     @staticmethod
     async def upload_videos(videos: List[UploadFile], user_id: int) -> List[str]:
-        """
-        Upload video files and return URLs
-        Returns list of video URLs
-        """
+        """Upload video files and return URLs"""
         if not videos:
             return []
         
-        # Filter to ensure only videos
         video_files = [f for f in videos if f.content_type in PostService.ALLOWED_VIDEO_TYPES]
         
         if not video_files:
@@ -349,11 +352,17 @@ class PostService:
             "Audio"
         )
         
-        # Generate unique filename
+        # ✅ Use Cloudinary if configured
+        use_cloudinary = getattr(settings, 'USE_CLOUDINARY', False)
+        
+        if use_cloudinary:
+            result = await CloudinaryService.upload_audio(audio, user_id)
+            return result["secure_url"]
+        
+        # Fallback to S3 or local
+        use_s3 = getattr(settings, 'USE_S3_STORAGE', False)
         file_extension = os.path.splitext(audio.filename)[1].lower()
         unique_filename = f"{user_id}/audio/{uuid.uuid4()}{file_extension}"
-        
-        use_s3 = getattr(settings, 'USE_S3_STORAGE', False)
         
         if use_s3:
             return await PostService._upload_to_s3(audio, unique_filename, audio.content_type)
@@ -368,6 +377,7 @@ class PostService:
         except Exception as e:
             print(f"Audio transcription error: {e}")
             return None
+    
     
     @staticmethod
     async def validate_platform_specific_content(

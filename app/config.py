@@ -20,7 +20,12 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
     
-    # File Storage (Optional - make empty strings if not using AWS yet)
+    CLOUDINARY_CLOUD_NAME: str = ""
+    CLOUDINARY_API_KEY: str = ""
+    CLOUDINARY_API_SECRET: str = ""
+    USE_CLOUDINARY: bool = False 
+    
+    # File Storage (Optional - AWS S3 for production)
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_BUCKET_NAME: str = ""
@@ -56,10 +61,7 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     
-    #s3 storage 
-    USE_S3_STORAGE:bool = False
-    
-    #Local storage dir path
+    #Local storage dir path (fallback if no cloud storage)
     UPLOAD_DIR:str = "uploads/"
     
     # Application URLs
