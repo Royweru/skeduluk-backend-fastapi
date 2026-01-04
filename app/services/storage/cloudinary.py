@@ -4,6 +4,8 @@ Cloudinary Storage Provider - integrates with your existing storage abstraction 
 """
 import cloudinary
 import cloudinary.uploader
+import traceback
+from io import BytesIO
 from typing import Optional, Dict, Any, BinaryIO
 from fastapi import UploadFile, HTTPException
 from ...config import settings
@@ -206,7 +208,12 @@ async def upload_to_cloudinary(
     Returns:
         Secure URL of uploaded file
     """
-    provider = CloudinaryStorageProvider()
-    folder = f"skeduluk/{file_type}/{user_id}"
-    
-    return await provider.upload_file(file, folder)
+    try:
+        provider = CloudinaryStorageProvider()
+        folder = f"skeduluk/{file_type}/{user_id}"
+        
+        return await provider.upload_file(file, folder)
+    except Exception as e:
+        print(f"❌ upload_to_cloudinary error: {e}")
+        traceback.print_exc()
+        raise
