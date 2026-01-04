@@ -1,15 +1,18 @@
-# app/services/cloudinary_service.py
+# app/services/storage/cloudinary.py
+"""
+Cloudinary Storage Provider - integrates with your existing storage abstraction layer
+"""
 import cloudinary
 import cloudinary.uploader
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, BinaryIO
 from fastapi import UploadFile, HTTPException
 from ...config import settings
 
-class CloudinaryService:
-    """Service for handling media uploads to Cloudinary"""
+
+class CloudinaryStorageProvider:
+    """Storage provider for Cloudinary"""
     
-    @staticmethod
-    def initialize():
+    def __init__(self):
         """Initialize Cloudinary configuration"""
         if not settings.CLOUDINARY_CLOUD_NAME:
             raise ValueError("CLOUDINARY_CLOUD_NAME not configured")
@@ -18,238 +21,192 @@ class CloudinaryService:
             cloud_name=settings.CLOUDINARY_CLOUD_NAME,
             api_key=settings.CLOUDINARY_API_KEY,
             api_secret=settings.CLOUDINARY_API_SECRET,
-            secure=True  # Always use HTTPS
+            secure=True
         )
         
-        print(f"✅ Cloudinary initialized: {settings.CLOUDINARY_CLOUD_NAME}")
+        print(f"✅ Cloudinary Storage Provider initialized: {settings.CLOUDINARY_CLOUD_NAME}")
     
-    @staticmethod
-    async def upload_image(
+    async def upload_file(
+        self,
         file: UploadFile,
-        user_id: int,
-        folder: str = "skeduluk/images"
-    ) -> Dict[str, Any]:
+        folder: str,
+        filename: Optional[str] = None,
+        **kwargs
+    ) -> str:
         """
-        Upload an image to Cloudinary
+        Upload a file to Cloudinary
+        
+        Args:
+            file: The uploaded file
+            folder: Folder path in Cloudinary (e.g., "skeduluk/images/123")
+            filename: Optional custom filename
+            **kwargs: Additional options (resource_type, etc.)
         
         Returns:
-            {
-                "url": "https://res.cloudinary.com/...",
-                "public_id": "skeduluk/images/xxx",
-                "secure_url": "https://res.cloudinary.com/...",
-                "format": "jpg",
-                "width": 1920,
-                "height": 1080,
-                "bytes": 123456
-            }
+            Secure URL of the uploaded file
         """
         try:
-            # Initialize if not already done
-            CloudinaryService.initialize()
-            
             # Read file content
             file.file.seek(0)
             file_content = await file.read()
             
-            # Upload to Cloudinary with auto-optimization
-            result = cloudinary.uploader.upload(
-                file_content,
-                folder=f"{folder}/{user_id}",
-                resource_type="image",
-                # Auto-optimize images
-                quality="auto:good",
-                fetch_format="auto",
-                # Generate unique filename
-                use_filename=True,
-                unique_filename=True,
-                overwrite=False
-            )
+            # Determine resource type
+            resource_type = kwargs.get('resource_type', 'auto')
+            if not resource_type or resource_type == 'auto':
+                if file.content_type.startswith('video/'):
+                    resource_type = 'video'
+                elif file.content_type.startswith('image/'):
+                    resource_type = 'image'
+                elif file.content_type.startswith('audio/'):
+                    resource_type = 'video'  # Audio uses 'video' in Cloudinary
+                else:
+                    resource_type = 'raw'
             
-            print(f"✅ Image uploaded to Cloudinary: {result['secure_url']}")
-            
-            return {
-                "url": result["secure_url"],
-                "public_id": result["public_id"],
-                "secure_url": result["secure_url"],
-                "format": result["format"],
-                "width": result.get("width"),
-                "height": result.get("height"),
-                "bytes": result["bytes"]
+            # Upload options
+            upload_options = {
+                'folder': folder,
+                'resource_type': resource_type,
+                'use_filename': True,
+                'unique_filename': True,
+                'overwrite': False
             }
             
-        except Exception as e:
-            print(f"❌ Cloudinary image upload error: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to upload image to Cloudinary: {str(e)}"
-            )
-    
-    @staticmethod
-    async def upload_video(
-        file: UploadFile,
-        user_id: int,
-        folder: str = "skeduluk/videos"
-    ) -> Dict[str, Any]:
-        """
-        Upload a video to Cloudinary
-        
-        Returns:
-            {
-                "url": "https://res.cloudinary.com/...",
-                "public_id": "skeduluk/videos/xxx",
-                "secure_url": "https://res.cloudinary.com/...",
-                "format": "mp4",
-                "duration": 30.5,
-                "width": 1920,
-                "height": 1080,
-                "bytes": 5234567
-            }
-        """
-        try:
-            # Initialize if not already done
-            CloudinaryService.initialize()
+            # Add custom filename if provided
+            if filename:
+                upload_options['public_id'] = f"{folder}/{filename}"
             
-            # Read file content
-            file.file.seek(0)
-            file_content = await file.read()
+            # For images, add optimization
+            if resource_type == 'image':
+                upload_options['quality'] = 'auto:good'
+                upload_options['fetch_format'] = 'auto'
             
-            # For videos larger than 100MB, use upload_large
-            if len(file_content) > 100 * 1024 * 1024:
-                print(f"📹 Large video detected ({len(file_content) / 1024 / 1024:.2f}MB), using chunked upload...")
+            # Upload to Cloudinary
+            # Use chunked upload for large files (>100MB)
+            file_size_mb = len(file_content) / (1024 * 1024)
+            
+            if file_size_mb > 100 and resource_type == 'video':
+                print(f"📹 Large file ({file_size_mb:.2f}MB), using chunked upload...")
                 result = cloudinary.uploader.upload_large(
                     file_content,
-                    folder=f"{folder}/{user_id}",
-                    resource_type="video",
-                    chunk_size=20 * 1024 * 1024,  # 20MB chunks
-                    use_filename=True,
-                    unique_filename=True,
-                    overwrite=False
+                    **upload_options,
+                    chunk_size=20 * 1024 * 1024  # 20MB chunks
                 )
             else:
-                # Regular upload for smaller videos
                 result = cloudinary.uploader.upload(
                     file_content,
-                    folder=f"{folder}/{user_id}",
-                    resource_type="video",
-                    use_filename=True,
-                    unique_filename=True,
-                    overwrite=False
+                    **upload_options
                 )
             
-            print(f"✅ Video uploaded to Cloudinary: {result['secure_url']}")
+            secure_url = result['secure_url']
+            print(f"✅ Uploaded to Cloudinary: {secure_url}")
             
-            return {
-                "url": result["secure_url"],
-                "public_id": result["public_id"],
-                "secure_url": result["secure_url"],
-                "format": result["format"],
-                "duration": result.get("duration"),
-                "width": result.get("width"),
-                "height": result.get("height"),
-                "bytes": result["bytes"]
-            }
+            return secure_url
             
         except Exception as e:
-            print(f"❌ Cloudinary video upload error: {e}")
+            print(f"❌ Cloudinary upload error: {e}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to upload video to Cloudinary: {str(e)}"
+                detail=f"Failed to upload to Cloudinary: {str(e)}"
             )
     
-    @staticmethod
-    async def upload_audio(
-        file: UploadFile,
-        user_id: int,
-        folder: str = "skeduluk/audio"
-    ) -> Dict[str, Any]:
-        """Upload an audio file to Cloudinary"""
-        try:
-            CloudinaryService.initialize()
-            
-            file.file.seek(0)
-            file_content = await file.read()
-            
-            result = cloudinary.uploader.upload(
-                file_content,
-                folder=f"{folder}/{user_id}",
-                resource_type="video",  # Audio uses 'video' resource type
-                use_filename=True,
-                unique_filename=True,
-                overwrite=False
-            )
-            
-            print(f"✅ Audio uploaded to Cloudinary: {result['secure_url']}")
-            
-            return {
-                "url": result["secure_url"],
-                "public_id": result["public_id"],
-                "secure_url": result["secure_url"],
-                "format": result["format"],
-                "duration": result.get("duration"),
-                "bytes": result["bytes"]
-            }
-            
-        except Exception as e:
-            print(f"❌ Cloudinary audio upload error: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to upload audio to Cloudinary: {str(e)}"
-            )
-    
-    @staticmethod
-    def delete_file(public_id: str, resource_type: str = "image") -> bool:
+    async def delete_file(self, file_url: str) -> bool:
         """
         Delete a file from Cloudinary
         
         Args:
-            public_id: The public ID of the file (e.g., "skeduluk/images/123/abc123")
-            resource_type: "image", "video", or "raw"
+            file_url: The full Cloudinary URL or public_id
         
         Returns:
             True if successful, False otherwise
         """
         try:
-            CloudinaryService.initialize()
+            # Extract public_id from URL
+            # https://res.cloudinary.com/cloud/image/upload/v123/folder/file.jpg
+            # -> folder/file
             
+            if file_url.startswith('http'):
+                # Extract from URL
+                parts = file_url.split('/upload/')
+                if len(parts) == 2:
+                    public_id = parts[1].split('.')[0]  # Remove extension
+                    # Remove version if present
+                    if '/' in public_id and public_id.split('/')[0].startswith('v'):
+                        public_id = '/'.join(public_id.split('/')[1:])
+                else:
+                    return False
+            else:
+                # Assume it's already a public_id
+                public_id = file_url
+            
+            # Determine resource type from URL
+            resource_type = 'image'
+            if '/video/' in file_url:
+                resource_type = 'video'
+            elif '/raw/' in file_url:
+                resource_type = 'raw'
+            
+            # Delete from Cloudinary
             result = cloudinary.uploader.destroy(
                 public_id,
                 resource_type=resource_type
             )
             
-            if result.get("result") == "ok":
+            if result.get('result') == 'ok':
                 print(f"✅ Deleted from Cloudinary: {public_id}")
                 return True
             else:
-                print(f"⚠️ Failed to delete from Cloudinary: {result}")
+                print(f"⚠️ Failed to delete: {result}")
                 return False
                 
         except Exception as e:
             print(f"❌ Cloudinary delete error: {e}")
             return False
     
-    @staticmethod
-    def get_video_thumbnail(video_url: str) -> str:
+    async def get_file_url(self, file_path: str) -> str:
         """
-        Generate a thumbnail URL for a video
+        Get the public URL for a file
         
         Args:
-            video_url: The Cloudinary video URL
+            file_path: The file path or public_id
         
         Returns:
-            Thumbnail image URL
+            The public URL
         """
-        # Extract public_id from URL
-        # https://res.cloudinary.com/cloud_name/video/upload/v123/folder/file.mp4
-        # -> folder/file
+        # If already a full URL, return as is
+        if file_path.startswith('http'):
+            return file_path
         
-        parts = video_url.split('/upload/')
-        if len(parts) == 2:
-            public_id = parts[1].split('.')[0]  # Remove extension
-            # Remove version number if present
-            if public_id.startswith('v'):
-                public_id = '/'.join(public_id.split('/')[1:])
-            
-            # Generate thumbnail URL
-            return f"https://res.cloudinary.com/{settings.CLOUDINARY_CLOUD_NAME}/video/upload/so_0,w_400,h_300,c_fill/{public_id}.jpg"
-        
-        return video_url
+        # Otherwise, construct the URL
+        # This assumes the file_path is a public_id
+        return f"https://res.cloudinary.com/{settings.CLOUDINARY_CLOUD_NAME}/image/upload/{file_path}"
+    
+    def get_upload_url(self, **kwargs) -> str:
+        """
+        Get a pre-signed upload URL (if needed for client-side uploads)
+        Not commonly used with Cloudinary
+        """
+        # Cloudinary handles this differently - you'd use the upload API
+        raise NotImplementedError("Use direct upload via upload_file method")
+
+
+# Convenience functions to maintain compatibility with existing code
+async def upload_to_cloudinary(
+    file: UploadFile,
+    user_id: int,
+    file_type: str = 'images'
+) -> str:
+    """
+    Quick upload function that matches your existing API
+    
+    Args:
+        file: The uploaded file
+        user_id: User ID for organizing files
+        file_type: 'images', 'videos', or 'audio'
+    
+    Returns:
+        Secure URL of uploaded file
+    """
+    provider = CloudinaryStorageProvider()
+    folder = f"skeduluk/{file_type}/{user_id}"
+    
+    return await provider.upload_file(file, folder)

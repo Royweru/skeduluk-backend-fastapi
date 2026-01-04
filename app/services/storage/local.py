@@ -1,85 +1,117 @@
 # app/services/storage/local.py
+"""
+Local Storage Provider - fallback for development
+WARNING: This will NOT work for LinkedIn/YouTube uploads!
+"""
+import os
+import uuid
 import aiofiles
 from pathlib import Path
-from typing import Dict, Any, Optional
-from fastapi import UploadFile
-import uuid
-import os
-
-from .base import StorageProvider
+from typing import Optional
+from fastapi import UploadFile, HTTPException
 from ...config import settings
 
-class LocalStorageProvider(StorageProvider):
-    """Local filesystem storage for development"""
+
+class LocalStorageProvider:
+    """
+    Local file system storage provider
+    
+    ⚠️ WARNING: Local URLs (localhost:3000) cannot be accessed by:
+    - Celery workers
+    - LinkedIn API
+    - YouTube API
+    - Any external service
+    
+    Use Cloudinary or S3 instead!
+    """
     
     def __init__(self):
-        self.base_path = Path(settings.UPLOAD_DIR)
-        self.base_path.mkdir(parents=True, exist_ok=True)
-        (self.base_path / "images").mkdir(exist_ok=True)
-        (self.base_path / "videos").mkdir(exist_ok=True)
-        (self.base_path / "audio").mkdir(exist_ok=True)
+        """Initialize local storage"""
+        self.upload_dir = Path(settings.UPLOAD_DIR)
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        print(f"⚠️ Local Storage Provider initialized: {self.upload_dir}")
+        print(f"⚠️ WARNING: Videos will NOT work for LinkedIn/YouTube!")
+        print(f"ℹ️ Set USE_CLOUDINARY=true in .env to fix this")
     
     async def upload_file(
-        self, 
-        file: UploadFile, 
-        user_id: int, 
-        file_type: str = "image",
-        custom_filename: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Save file to local filesystem"""
-        await file.seek(0)
+        self,
+        file: UploadFile,
+        folder: str,
+        filename: Optional[str] = None,
+        **kwargs
+    ) -> str:
+        """
+        Upload a file to local storage
         
-        ext = Path(file.filename).suffix.lower()
-        if custom_filename:
-            filename = f"{user_id}/{file_type}/{custom_filename}{ext}"
-        else:
-            filename = f"{user_id}/{file_type}/{uuid.uuid4()}{ext}"
+        Args:
+            file: The uploaded file
+            folder: Folder path (e.g., "images/123")
+            filename: Optional custom filename
+            **kwargs: Ignored (for compatibility)
         
-        file_path = self.base_path / filename
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        content = await file.read()
-        
-        async with aiofiles.open(file_path, 'wb') as out_file:
-            await out_file.write(content)
-        
-        url = f"{settings.BACKEND_URL}/uploads/{filename}"
-        
-        return {
-            "url": url,
-            "path": str(file_path),
-            "filename": file.filename,
-            "size": len(content),
-            "type": file_type
-        }
+        Returns:
+            Local URL (WARNING: Only works on localhost!)
+        """
+        try:
+            # Generate filename
+            file_extension = os.path.splitext(file.filename)[1].lower()
+            if filename:
+                unique_filename = f"{folder}/{filename}{file_extension}"
+            else:
+                unique_filename = f"{folder}/{uuid.uuid4()}{file_extension}"
+            
+            # Create directory
+            file_path = self.upload_dir / unique_filename
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Save file
+            file.file.seek(0)
+            async with aiofiles.open(file_path, 'wb') as out_file:
+                content = await file.read()
+                await out_file.write(content)
+            
+            # Generate URL
+            file_url = f"http://localhost:3000/uploads/{unique_filename}"
+            
+            print(f"⚠️ Saved to local storage: {file_url}")
+            print(f"⚠️ This URL will NOT work from Celery or external APIs!")
+            
+            return file_url
+            
+        except Exception as e:
+            print(f"❌ Local storage error: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to save file locally: {str(e)}"
+            )
     
     async def delete_file(self, file_url: str) -> bool:
-        """Delete local file"""
+        """Delete a file from local storage"""
         try:
-            path_part = file_url.split("/uploads/")[1]
-            file_path = self.base_path / path_part
+            # Extract filename from URL
+            # http://localhost:3000/uploads/folder/file.jpg -> folder/file.jpg
+            if '/uploads/' in file_url:
+                filename = file_url.split('/uploads/')[1]
+                file_path = self.upload_dir / filename
+                
+                if file_path.exists():
+                    file_path.unlink()
+                    print(f"✅ Deleted local file: {filename}")
+                    return True
             
-            if file_path.exists():
-                file_path.unlink()
-            return True
+            return False
+            
         except Exception as e:
-            print(f"Local delete error: {e}")
+            print(f"❌ Local delete error: {e}")
             return False
     
-    def get_public_url(self, resource_path: str) -> str:
-        return f"{settings.BACKEND_URL}/uploads/{resource_path}"
+    async def get_file_url(self, file_path: str) -> str:
+        """Get the URL for a local file"""
+        if file_path.startswith('http'):
+            return file_path
+        
+        return f"http://localhost:3000/uploads/{file_path}"
     
-    async def download_file(self, file_url: str) -> Optional[bytes]:
-        """Download from local storage"""
-        try:
-            path_part = file_url.split("/uploads/")[1]
-            file_path = self.base_path / path_part
-            
-            if not file_path.exists():
-                return None
-            
-            async with aiofiles.open(file_path, 'rb') as f:
-                return await f.read()
-        except Exception as e:
-            print(f"Local download error: {e}")
-            return None
+    def get_upload_url(self, **kwargs) -> str:
+        """Not implemented for local storage"""
+        raise NotImplementedError("Pre-signed URLs not supported for local storage")

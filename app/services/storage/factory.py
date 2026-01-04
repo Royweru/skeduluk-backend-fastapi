@@ -1,42 +1,65 @@
 # app/services/storage/factory.py
+"""
+Storage factory - creates the appropriate storage provider based on configuration
+"""
 from typing import Optional
 from ...config import settings
-from .base import StorageProvider
-from .local import LocalStorageProvider
-from .s3 import S3StorageProvider
-from .cloudinary import CloudinaryStorageProvider
 
-def get_storage_provider() -> StorageProvider:
-    """Factory to create storage provider based on configuration"""
-    storage_type = settings.STORAGE_PROVIDER.lower()
+# Storage provider type
+StorageProvider = None
+
+
+def get_storage_provider():
+    """
+    Get the configured storage provider based on settings
     
-    if storage_type == "cloudinary":
-        if not settings.CLOUDINARY_CLOUD_NAME:
-            raise ValueError("CLOUDINARY_CLOUD_NAME not configured. Set STORAGE_PROVIDER=local for development.")
-        return CloudinaryStorageProvider()
+    Returns:
+        Instance of the configured storage provider (Cloudinary, S3, or Local)
+    """
+    global StorageProvider
     
-    elif storage_type == "s3":
-        if not settings.AWS_BUCKET_NAME:
-            raise ValueError("AWS_BUCKET_NAME not configured")
-        return S3StorageProvider()
+    # Cloudinary (recommended for development)
+    if getattr(settings, 'USE_CLOUDINARY', False):
+        if StorageProvider is None:
+            from .cloudinary import CloudinaryStorageProvider
+            StorageProvider = CloudinaryStorageProvider()
+            print("✅ Using Cloudinary Storage Provider")
+        return StorageProvider
     
-    elif storage_type == "local":
-        return LocalStorageProvider()
+    # AWS S3 (recommended for production)
+    elif getattr(settings, 'USE_S3_STORAGE', False):
+        if StorageProvider is None:
+            try:
+                from .s3 import S3StorageProvider
+                StorageProvider = S3StorageProvider()
+                print("✅ Using S3 Storage Provider")
+            except ImportError:
+                print("⚠️ S3 storage not available, falling back to local")
+                from .local import LocalStorageProvider
+                StorageProvider = LocalStorageProvider()
+        return StorageProvider
     
+    # Local storage (fallback - not recommended for production)
     else:
-        raise ValueError(f"Unknown STORAGE_PROVIDER: {storage_type}. Use 'local', 's3', or 'cloudinary'")
+        if StorageProvider is None:
+            print("⚠️ No cloud storage configured, using local storage")
+            print("⚠️ This will NOT work for LinkedIn/YouTube video uploads!")
+            print("ℹ️ Set USE_CLOUDINARY=true in .env to fix this")
+            from .local import LocalStorageProvider
+            StorageProvider = LocalStorageProvider()
+        return StorageProvider
 
-# Global singleton
-_storage_instance: Optional[StorageProvider] = None
 
-def get_storage() -> StorageProvider:
-    """Get or create global storage instance"""
-    global _storage_instance
-    if _storage_instance is None:
-        _storage_instance = get_storage_provider()
-    return _storage_instance
+def get_storage():
+    """
+    Convenience function to get storage provider
+    Alias for get_storage_provider()
+    """
+    return get_storage_provider()
 
-def reset_storage():
-    """Reset storage instance (useful for testing)"""
-    global _storage_instance
-    _storage_instance = None
+
+# Reset storage provider (useful for testing)
+def reset_storage_provider():
+    """Reset the cached storage provider"""
+    global StorageProvider
+    StorageProvider = None

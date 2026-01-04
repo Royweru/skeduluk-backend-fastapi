@@ -80,4 +80,4 @@ class S3StorageProvider(StorageProvider):
                 return None
         except Exception as e:
             print(f"S3 download error: {e}")
-            return Nones
+            return None
