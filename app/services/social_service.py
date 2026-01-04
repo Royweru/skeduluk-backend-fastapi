@@ -7,6 +7,7 @@ from datetime import datetime
 import asyncio
 import mimetypes
 from pathlib import Path
+from .platforms.linkedin import LinkedIn
 from requests_oauthlib import OAuth1Session
 import base64
 from io import BytesIO
@@ -51,11 +52,11 @@ class SocialService:
         if platform == "TWITTER":
             return await SocialService._post_to_twitter(access_token, content, image_urls, video_urls)
         elif platform == "FACEBOOK":
-            return await SocialService._post_to_facebook(access_token, content, image_urls, video_urls)
+            return await SocialService.__post_to_facebook_with_connection(access_token, content, image_urls, video_urls)
         elif platform == "INSTAGRAM":
             return await SocialService._post_to_instagram(access_token, content, image_urls, video_urls)
         elif platform == "LINKEDIN":
-            return await SocialService._post_to_linkedin(access_token, content, image_urls, video_urls)
+            return await LinkedIn.post(access_token, content, image_urls, video_urls)
         elif platform == "YOUTUBE":
             return await SocialService._post_to_youtube(access_token, content, video_urls)
         else:

@@ -29,24 +29,28 @@ def get_async_database_url():
     return async_url
 
 # ==================== GLOBAL ENGINE FOR FASTAPI ====================
-# This engine is created once when the application starts and is used
-# by all FastAPI requests. It's tied to the main event loop.
 
-# Create async engine for FastAPI
+# Create async engine for FastAPI with improved settings
 engine = create_async_engine(
     get_async_database_url(),
-    echo=False,  # Set to True for SQL query logging
+    echo=False,
     pool_pre_ping=True,  # Verify connections are alive before using
     pool_recycle=300,  # Recycle connections after 5 minutes
+    pool_size=20,  # ✅ Increased pool size for concurrent requests
+    max_overflow=10,  # ✅ Allow extra connections during peak
+    pool_timeout=30,  # ✅ Wait up to 30 seconds for a connection
     connect_args={
         "ssl": "require",  # Neon requires SSL
+        "timeout": 60,  # ✅ 60 second connection timeout
+        "command_timeout": 60,  # ✅ 60 second command timeout
         "server_settings": {
-            "application_name": "social_scheduler_fastapi"
+            "application_name": "social_scheduler_fastapi",
+            "jit": "off"  # Disable JIT for faster simple queries
         }
     }
 )
 
-# Create async session factory for FastAPI (bound to global engine)
+# Create async session factory for FastAPI
 AsyncSessionLocal = async_sessionmaker(
     engine, 
     class_=AsyncSession, 
@@ -57,38 +61,49 @@ AsyncSessionLocal = async_sessionmaker(
 Base = declarative_base()
 
 # ==================== DEPENDENCY FOR FASTAPI ====================
-# This is used in your FastAPI endpoints like:
-# async def my_endpoint(db: AsyncSession = Depends(get_async_db))
+
 async def get_async_db():
     """
     FastAPI dependency that provides a database session.
-    Creates a new session for each request and ensures it's closed after.
+    ✅ Improved error handling for connection issues
     """
     async with AsyncSessionLocal() as session:
         try:
             yield session
+        except Exception as e:
+            print(f"❌ Database session error: {e}")
+            # Let FastAPI's exception handler deal with it
+            raise
         finally:
-            await session.close()
+            # Close session cleanly
+            try:
+                await session.close()
+            except Exception as close_error:
+                print(f"⚠️ Error closing session: {close_error}")
+                # Don't re-raise - session is already problematic
 
 # ==================== ENGINE FACTORY FOR CELERY ====================
-# Celery tasks run in separate processes with different event loops.
-# They need their own engine instances to avoid conflicts.
 
 def create_task_engine():
     """
     Create a NEW engine instance for Celery tasks.
     Each task gets its own engine bound to its own event loop.
-    This prevents "Event loop is closed" errors.
     """
     return create_async_engine(
         get_async_database_url(),
         echo=False,
         pool_pre_ping=True,
-        pool_recycle=300,  # 5 minutes
+        pool_recycle=300,
+        pool_size=10,  # Smaller pool for Celery workers
+        max_overflow=5,
+        pool_timeout=30,
         connect_args={
             "ssl": "require",
+            "timeout": 60,
+            "command_timeout": 60,
             "server_settings": {
-                "application_name": "social_scheduler_celery"
+                "application_name": "social_scheduler_celery",
+                "jit": "off"
             }
         }
     )
