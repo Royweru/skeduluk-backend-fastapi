@@ -125,7 +125,7 @@ class SocialService:
             result["platform"] = platform
             
             if result["success"]:
-                print(f" {platform}: Posted successfully!")
+                print(f"{platform}: Posted successfully!")
                 print(f"   URL: {result.get('url', 'N/A')}")
             else:
                 print(f"{platform}: Failed - {result.get('error', 'Unknown error')}")
