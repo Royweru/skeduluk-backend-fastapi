@@ -183,6 +183,8 @@ async def create_post(
 # All other endpoints remain the same
 # ===================================================================
 
+# app/routers/posts.py
+
 @router.get("/{post_id}/status")
 async def get_post_status(
     post_id: int,
@@ -197,25 +199,38 @@ async def get_post_status(
     from app.crud import PostResultCRUD
     results = await PostResultCRUD.get_results_by_post(db, post_id)
     
+    # ✅ FIX: Parse platforms JSON string to array
+    platforms_list = []
+    if post.platforms:
+        if isinstance(post.platforms, str):
+            try:
+                platforms_list = json.loads(post.platforms)
+            except json.JSONDecodeError:
+                # Fallback: split by comma if not valid JSON
+                platforms_list = [p.strip() for p in post.platforms.split(',') if p.strip()]
+        elif isinstance(post.platforms, list):
+            platforms_list = post.platforms
+        else:
+            platforms_list = []
+    
     return {
         "post_id": post.id,
         "status": post.status,
         "error_message": post.error_message,
-        "platforms": post.platforms,
-        "created_at": post.created_at,
-        "scheduled_for": post.scheduled_for,
+        "platforms": platforms_list, 
+        "created_at": post.created_at.isoformat() if post.created_at else None,
+        "scheduled_for": post.scheduled_for.isoformat() if post.scheduled_for else None,
         "results": [
             {
                 "platform": r.platform,
                 "status": r.status,
                 "platform_post_id": r.platform_post_id,
                 "error": r.error_message,
-                "posted_at": r.posted_at
+                "posted_at": r.posted_at.isoformat() if r.posted_at else None
             }
             for r in results
         ]
     }
-
 
 @router.post("/{post_id}/publish")
 async def publish_post_now(
