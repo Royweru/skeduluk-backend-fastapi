@@ -25,6 +25,7 @@ app.add_middleware(
         "http://127.0.0.1:3001",
         "https://skeduluk-social.vercel.app", 
         "https://*.vercel.app", 
+        "https://www.skeduluk.club"
     ],
     allow_credentials=True,
     allow_methods=["*"],
