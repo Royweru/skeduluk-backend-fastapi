@@ -9,7 +9,7 @@ from app.database import get_async_db
 from app.crud import PostCRUD
 from app.services.ai_service import ai_service
 from app.services.post_service import PostService
-
+from app.utils.datetime_utils import make_timezone_naive
 router = APIRouter(prefix="/posts", tags=["posts"])
 
 @router.post("/", response_model=schemas.PostCreateResponse)
@@ -59,9 +59,10 @@ async def create_post(
         if scheduled_for:
             try:
                 parsed_dt = datetime.fromisoformat(scheduled_for.replace('Z', '+00:00'))
-                scheduled_datetime = parsed_dt.replace(tzinfo=None)
+                scheduled_datetime = make_timezone_naive(parsed_dt) 
             except ValueError:
                 raise HTTPException(400, "Invalid date format. Use ISO format.")
+            
         # ===================================================================
         # STEP 2: Upload media files FIRST (SLOW OPERATION)
         
