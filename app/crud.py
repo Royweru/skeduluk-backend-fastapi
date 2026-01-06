@@ -5,6 +5,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import json
 from . import models, schemas
+from app.utils.datetime_utils import make_timezone_naive, utcnow_naive
 
 class UserCRUD:
     @staticmethod
@@ -245,38 +246,51 @@ class PostCRUD:
         result = await db.execute(query)
         return result.scalar_one_or_none()
 
+  
     @staticmethod
     async def create_post(
         db: AsyncSession, 
-        post: schemas.PostCreate,  # This object has all the data we need
+        post: schemas.PostCreate,
         user_id: int
-        
     ) -> models.Post:
         """Create a new post with support for platform-specific content and videos"""
         
-        # --- FIX FOR TYPE MISMATCH ---
-        # Your 'enhanced_content' column is Text, but your schema sends a dict.
-        # We must convert the dict to a JSON string to store it in a Text column.
+        # Convert enhanced_content dict to JSON string
         enhanced_content_str = None
         if post.enhanced_content:
             enhanced_content_str = json.dumps(post.enhanced_content)
         
+        # Convert platform_specific_content to JSON string
+        platform_specific_content_str = None
+        if post.platform_specific_content:
+            platform_specific_content_str = json.dumps(post.platform_specific_content)
+        
+        # Convert lists to JSON strings
+        image_urls_str = json.dumps(post.image_urls or [])
+        video_urls_str = json.dumps(post.video_urls or [])
+        platforms_str = json.dumps(post.platforms)
+        
+        # ✅ FIX: Ensure scheduled_for is timezone-naive
+        scheduled_datetime = make_timezone_naive(post.scheduled_for)
+        
+        # ✅ FIX: Use timezone-naive datetime for created_at and updated_at
+        now = utcnow_naive()
+        
         db_post = models.Post(
             user_id=user_id,
             original_content=post.original_content,
-            
-            # --- FIX FOR DATA LOSS ---
-            # Use the data from the 'post' schema object, not separate arguments
             enhanced_content=enhanced_content_str,
-            platform_specific_content=post.platform_specific_content,
-            image_urls=post.image_urls or [],
-            video_urls=post.video_urls or [], # You added this field in the schema, so let's use it
+            platform_specific_content=platform_specific_content_str,
+            image_urls=image_urls_str,
+            video_urls=video_urls_str,
             audio_file_url=post.audio_file_url,
-            platforms=post.platforms,
-            scheduled_for=post.scheduled_for,
-            status="scheduled" if post.scheduled_for else "draft",
-            created_at=datetime.utcnow()
+            platforms=platforms_str,
+            scheduled_for=scheduled_datetime,  # ✅ Timezone-naive
+            status="scheduled" if scheduled_datetime else "draft",
+            created_at=now,  # ✅ Timezone-naive
+            updated_at=now   # ✅ Timezone-naive
         )
+        
         db.add(db_post)
         await db.commit()
         await db.refresh(db_post)

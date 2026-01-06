@@ -58,15 +58,12 @@ async def create_post(
         scheduled_datetime = None
         if scheduled_for:
             try:
-                scheduled_datetime = datetime.fromisoformat(scheduled_for.replace('Z', '+00:00'))
+                parsed_dt = datetime.fromisoformat(scheduled_for.replace('Z', '+00:00'))
+                scheduled_datetime = parsed_dt.replace(tzinfo=None)
             except ValueError:
                 raise HTTPException(400, "Invalid date format. Use ISO format.")
-        
         # ===================================================================
-        # STEP 2: Upload media files (NO DATABASE CONNECTION YET)
-        # ===================================================================
-        # ✅ This is the critical fix - uploads happen OUTSIDE the DB transaction
-        # ✅ This prevents database connection timeouts on large uploads
+        # STEP 2: Upload media files FIRST (SLOW OPERATION)
         
         print(f"📤 Starting media uploads for user {current_user.id}...")
         
