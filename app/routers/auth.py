@@ -1,6 +1,6 @@
 # app/routers/auth.py
 from datetime import timedelta
-from typing import Annotated,Dict,List
+from typing import Annotated,Dict,List,Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -216,16 +216,70 @@ async def oauth_authorize(
 @router.get("/oauth/callback/{platform}")
 async def oauth_callback(
     platform: str,
-    code: str = Query(...),
-    state: str = Query(...),
-    error: str = Query(default=None),
-    db: AsyncSession = Depends(get_async_db)
+    code: Optional[str] = Query(default=None),
+    state: Optional[str] = Query(default=None),
+    error: Optional[str] = Query(default=None),
+    db: AsyncSession = Depends(get_async_db),
+    error_description: Optional[str] = Query(None),
+    
+    # OAuth 1.0a parameters (Twitter)
+    oauth_token: Optional[str] = Query(None),
+    oauth_verifier: Optional[str] = Query(None),
+    denied: Optional[str] = Query(None),
 ):
+    print(f"\n{'='*60}")
+    print(f" OAuth Callback Received")
+    print(f"Platform: {platform}")
+    print(f"Code: {code[:20] if code else 'None'}...")
+    print(f"OAuth Token: {oauth_token[:20] if oauth_token else 'None'}...")
+    print(f"OAuth Verifier: {oauth_verifier[:20] if oauth_verifier else 'None'}...")
+    print(f"State: {state[:30] if state else 'None'}...")
+    print(f"Error: {error or 'None'}")
+    print(f"{'='*60}\n")
     """
     Handle OAuth callback from social platform
     Returns HTML that closes popup and communicates with parent window
     """
-    result = await OAuthService.handle_oauth_callback(platform, code, state, db, error)
+    # Check for user denial
+    if denied:
+        print(f"❌ User denied authorization")
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote('You cancelled the connection')}"
+        )
+    
+    if error:
+        error_msg = error_description or error
+        print(f"❌ OAuth error: {error_msg}")
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote(error_msg)}"
+        )
+    
+    # ✅ Validate that we have EITHER OAuth 1.0a OR OAuth 2.0 parameters
+    is_oauth1 = bool(oauth_token and oauth_verifier)
+    is_oauth2 = bool(code)
+    
+    if not is_oauth1 and not is_oauth2:
+        print(f"❌ Missing required parameters")
+        print(f"   Expected: (code + state) OR (oauth_token + oauth_verifier)")
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote('Missing authorization parameters')}"
+        )
+    
+    # ✅ State is required for both protocols
+    if not state:
+        print(f"❌ Missing state parameter")
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote('Invalid connection link - missing state')}"
+        )
+    result = await OAuthService.handle_oauth_callback(
+            platform=platform,
+            code=code,
+            state=state,
+            oauth_token=oauth_token,
+            oauth_verifier=oauth_verifier,
+            db=db,
+            error=error
+        )
     
     # Return HTML that closes popup and communicates with parent window
     if result["success"]:
