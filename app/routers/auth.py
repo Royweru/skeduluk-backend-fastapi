@@ -1,5 +1,6 @@
 # app/routers/auth.py
 from datetime import timedelta
+from urllib.parse import quote  # <--- Use this standard library for URLs
 from typing import Annotated,Dict,List,Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from fastapi.security import OAuth2PasswordRequestForm
@@ -209,7 +210,7 @@ async def oauth_authorize(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ OAuth initiate error: {e}")
+        print(f" OAuth initiate error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -242,32 +243,32 @@ async def oauth_callback(
     """
     # Check for user denial
     if denied:
-        print(f"❌ User denied authorization")
+        print(f" User denied authorization")
         return RedirectResponse(
             url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote('You cancelled the connection')}"
         )
     
     if error:
         error_msg = error_description or error
-        print(f"❌ OAuth error: {error_msg}")
+        print(f" OAuth error: {error_msg}")
         return RedirectResponse(
             url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote(error_msg)}"
         )
     
-    # ✅ Validate that we have EITHER OAuth 1.0a OR OAuth 2.0 parameters
+    #  Validate that we have EITHER OAuth 1.0a OR OAuth 2.0 parameters
     is_oauth1 = bool(oauth_token and oauth_verifier)
     is_oauth2 = bool(code)
     
     if not is_oauth1 and not is_oauth2:
-        print(f"❌ Missing required parameters")
+        print(f" Missing required parameters")
         print(f"   Expected: (code + state) OR (oauth_token + oauth_verifier)")
         return RedirectResponse(
             url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote('Missing authorization parameters')}"
         )
     
-    # ✅ State is required for both protocols
+    #  State is required for both protocols
     if not state:
-        print(f"❌ Missing state parameter")
+        print(f" Missing state parameter")
         return RedirectResponse(
             url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote('Invalid connection link - missing state')}"
         )
@@ -360,7 +361,7 @@ async def oauth_callback(
         </head>
         <body>
             <div class="container">
-                <div class="icon">✅</div>
+                <div class="icon"></div>
                 <h1>Connected Successfully!</h1>
                 <p>Your {platform_display} account has been linked</p>
                 {f'<p class="username">{username}</p>' if username else ''}
@@ -368,7 +369,7 @@ async def oauth_callback(
                 <p style="margin-top: 1rem; font-size: 0.875rem;">Closing window...</p>
             </div>
             <script>
-                console.log('✅ OAuth callback successful for {platform}');
+                console.log(' OAuth callback successful for {platform}');
                 
                 // Send message to parent window
                 if (window.opener) {{
@@ -380,7 +381,7 @@ async def oauth_callback(
                         }}, '*');
                         console.log('📤 Message sent to parent window');
                     }} catch (error) {{
-                        console.error('❌ Error sending message:', error);
+                        console.error(' Error sending message:', error);
                     }}
                 }}
                 
@@ -465,14 +466,14 @@ async def oauth_callback(
         </head>
         <body>
             <div class="container">
-                <div class="icon">❌</div>
+                <div class="icon"></div>
                 <h1>Connection Failed</h1>
                 <p style="margin-bottom: 1rem;">Failed to connect {platform_display}</p>
                 <div class="error-message">{error_message}</div>
                 <p>This window will close in 3 seconds...</p>
             </div>
             <script>
-                console.error('❌ OAuth callback failed for {platform}:', '{error_message}');
+                console.error(' OAuth callback failed for {platform}:', '{error_message}');
                 
                 // Send error to parent window
                 if (window.opener) {{
@@ -484,7 +485,7 @@ async def oauth_callback(
                         }}, '*');
                         console.log('📤 Error message sent to parent window');
                     }} catch (error) {{
-                        console.error('❌ Error sending message:', error);
+                        console.error(' Error sending message:', error);
                     }}
                 }}
                 
@@ -643,11 +644,11 @@ async def debug_oauth_config(platform: str):
     
     return {
         "platform": platform,
-        "status": "✅ VALID" if is_valid else f"❌ INVALID: {error_msg}",
+        "status": " VALID" if is_valid else f" INVALID: {error_msg}",
         "configuration": {
             "client_id": f"{config.get('client_id', 'NOT SET')[:15]}..." if config.get('client_id') else "NOT SET",
             "client_id_length": len(config.get('client_id', '')) if config.get('client_id') else 0,
-            "client_secret_set": "YES ✅" if config.get('client_secret') else "NO ❌",
+            "client_secret_set": "YES " if config.get('client_secret') else "NO ",
             "client_secret_length": len(config.get('client_secret', '')) if config.get('client_secret') else 0,
             "redirect_uri": config.get('redirect_uri', 'NOT SET'),
             "auth_url": config.get('auth_url'),
@@ -680,7 +681,7 @@ def _get_config_warnings(platform: str, config: Dict) -> List[str]:
     
     # Platform-specific warnings
     if platform == 'twitter' and not config.get('uses_pkce'):
-        warnings.append("❌ Twitter REQUIRES PKCE! Set uses_pkce to True")
+        warnings.append(" Twitter REQUIRES PKCE! Set uses_pkce to True")
     
     if platform == 'facebook' and 'pages_show_list' not in config.get('scope', ''):
         warnings.append("⚠️ Facebook scope missing 'pages_show_list' - you won't be able to post to pages")
@@ -748,7 +749,7 @@ async def validate_oauth_setup():
         is_valid, error_msg = OAuthService.validate_config(platform)
         
         results[platform] = {
-            "status": "✅ Ready" if is_valid else "❌ Not Ready",
+            "status": " Ready" if is_valid else " Not Ready",
             "error": error_msg if not is_valid else None,
             "redirect_uri": OAUTH_CONFIGS[platform].get('redirect_uri')
         }
