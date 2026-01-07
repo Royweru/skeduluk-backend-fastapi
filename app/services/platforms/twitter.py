@@ -244,7 +244,7 @@ class TwitterService(BasePlatformService):
                 return media_id
             
             # âœ… Fallback to v1.1 endpoint (for compatibility)
-            print(f"   ðŸ"„ Falling back to v1.1 endpoint...")
+            print(f" ðŸ”„ Falling back to v1.1 endpoint...")
             media_id = await cls._try_upload_v1(
                 twitter_session, media_data, media_type, content_type
             )
