@@ -271,11 +271,11 @@ class OAuthService:
                 parsed.params, new_query, parsed.fragment
             ))
             
-            print(f"✅ OAuth 1.0a authorization URL generated")
+            print(f" OAuth 1.0a authorization URL generated")
             return authorization_url
             
         except Exception as e:
-            print(f"❌ OAuth 1.0a error: {e}")
+            print(f" OAuth 1.0a error: {e}")
             raise HTTPException(500, f"Failed to initiate OAuth: {str(e)}")
     
     @classmethod
@@ -308,7 +308,7 @@ class OAuthService:
             if not access_token or not access_token_secret:
                 return {"success": False, "error": "Failed to get access tokens"}
             
-            # ✅ CRITICAL: Format as "token:secret" for TwitterService
+            #  CRITICAL: Format as "token:secret" for TwitterService
             combined_token = f"{access_token}:{access_token_secret}"
             
             # Get user info
@@ -347,15 +347,17 @@ class OAuthService:
                 db=db,
                 user_id=user_id,
                 platform=platform.upper(),
-                access_token=combined_token,  # ✅ "token:secret" format
+                access_token=combined_token,  #  "token:secret" format
                 refresh_token=None,  # OAuth 1.0a doesn't use refresh tokens
                 expires_in=None,  # OAuth 1.0a tokens don't expire
                 platform_user_id=user_info["user_id"],
                 platform_username=user_info["username"],
-                platform_name=user_info["name"]
+                platform_name=user_info["name"],
+                platform_protocol="oauth1",
+                oauth_token_secret=access_token_secret
             )
             
-            print(f"✅ OAuth 1.0a connection saved")
+            print(f" OAuth 1.0a connection saved")
             
             return {
                 "success": True,
@@ -366,7 +368,7 @@ class OAuthService:
         except JWTError:
             return {"success": False, "error": "Invalid or expired connection link"}
         except Exception as e:
-            print(f"❌ OAuth 1.0a callback error: {e}")
+            print(f" OAuth 1.0a callback error: {e}")
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e)}
@@ -419,11 +421,11 @@ class OAuthService:
             query_string = urlencode(params, quote_via=quote)
             auth_url = f"{config['auth_url']}?{query_string}"
             
-            print(f"✅ OAuth 2.0 authorization URL generated")
+            print(f" OAuth 2.0 authorization URL generated")
             return auth_url
             
         except Exception as e:
-            print(f"❌ OAuth 2.0 error: {e}")
+            print(f" OAuth 2.0 error: {e}")
             raise HTTPException(500, f"Failed to initiate OAuth: {str(e)}")
     
     @classmethod
@@ -507,10 +509,11 @@ class OAuthService:
                     platform_user_id=user_info.get("user_id"),
                     platform_username=user_info.get("username"),
                     platform_name=user_info.get("name"),
-                    platform_email=user_info.get("email")
+                    platform_protocol=config.get("protocol"),
+                    oauth_token_secret=None
                 )
                 
-                print(f"✅ OAuth 2.0 connection saved")
+                print(f" OAuth 2.0 connection saved")
                 
                 return {
                     "success": True,
@@ -521,7 +524,7 @@ class OAuthService:
         except JWTError:
             return {"success": False, "error": "Invalid or expired connection link"}
         except Exception as e:
-            print(f"❌ OAuth 2.0 callback error: {e}")
+            print(f" OAuth 2.0 callback error: {e}")
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e)}
@@ -571,12 +574,12 @@ class OAuthService:
                 print(f" Exchanged for long-lived token (expires in {data.get('expires_in', 'unknown')}s)")
                 return data["access_token"], data
             else:
-                print(f"⚠️ Token exchange failed ({response.status_code}), using short-lived token")
+                print(f" Token exchange failed ({response.status_code}), using short-lived token")
                 print(f"Response: {response.text}")
                 return short_token, {"access_token": short_token, "expires_in": 3600}
                 
         except Exception as e:
-            print(f"⚠️ Token exchange error: {e}")
+            print(f" Token exchange error: {e}")
             return short_token, {"access_token": short_token, "expires_in": 3600}
 
     @classmethod
@@ -588,17 +591,17 @@ class OAuthService:
         refresh_token = connection.refresh_token
 
         if not refresh_token:
-            print(f"⚠️ No refresh token for {platform}")
+            print(f" No refresh token for {platform}")
             return None
         
         if platform not in OAUTH_CONFIGS:
-            print(f"⚠️ Platform {platform} not in OAUTH_CONFIGS")
+            print(f" Platform {platform} not in OAUTH_CONFIGS")
             return None
         
         config = OAUTH_CONFIGS[platform]
         
-        # 🔍 DEBUG: Print what we're about to do
-        print(f"🔄 Attempting token refresh for {platform}")
+        # 🔍 DEBUG: Print what we're a'\\\'';;;;
+        print(f"Attempting token refresh for {platform}")
         print(f"   Refresh token length: {len(refresh_token)}")
         print(f"   Token URL: {config['token_url']}")
         print(f"   Client ID: {config['client_id'][:20]}...")
@@ -721,7 +724,7 @@ class OAuthService:
                     "name": data.get("name"),
                     "email": data.get("email")
                 }
-            #  ✅ TIKTOK USER INFO PARSING
+            #   TIKTOK USER INFO PARSING
             elif platform == "tiktok":
                 # TikTok returns nested data structure
                 user_data = data.get("data", {}).get("user", {})
@@ -744,7 +747,8 @@ class OAuthService:
         cls, db: AsyncSession, user_id: int, platform: str, access_token: str,
         refresh_token: Optional[str], expires_in: Optional[int], platform_user_id: Optional[str],
         platform_username: Optional[str] = None, platform_name: Optional[str] = None,
-        platform_email: Optional[str] = None
+        platform_email: Optional[str] = None, platform_protocol:Optional[str] = None,
+        oauth_token_secret:Optional[str] = None
     ) -> models.SocialConnection:
         
         if not platform_user_id:
@@ -766,6 +770,7 @@ class OAuthService:
         if connection:
             print(f"Updating existing connection ID: {connection.id}")
             connection.platform_username = platform_username
+            connection.protocol = platform_protocol
             connection.username = platform_name or platform_username
             connection.access_token = access_token
             connection.refresh_token = refresh_token
@@ -777,6 +782,7 @@ class OAuthService:
             connection = models.SocialConnection(
                 user_id=user_id,
                 platform=platform.upper(),
+                protocol = platform_protocol,
                 platform_user_id=platform_user_id,
                 platform_username=platform_username,
                 username=platform_name or platform_username,
@@ -827,9 +833,9 @@ class OAuthService:
                             print(f"   Total pages available: {len(pages)}")
                             
                             if len(pages) > 1:
-                                print(f"   ℹ️  User has {len(pages)} pages. They can change selection in settings.")
+                                print(f"User has {len(pages)} pages. They can change selection in settings.")
                         else:
-                            print(f"⚠️  No Facebook Pages found for this user.")
+                            print(f"  No Facebook Pages found for this user.")
                             print(f"   User needs to create a Facebook Page to post via API.")
                             # Clear any previous page selection
                             connection.facebook_page_id = None
@@ -838,16 +844,16 @@ class OAuthService:
                             connection.facebook_page_category = None
                             connection.facebook_page_picture = None
                     else:
-                        print(f"⚠️  Failed to fetch Facebook pages: {pages_response.status_code}")
+                        print(f"  Failed to fetch Facebook pages: {pages_response.status_code}")
                         print(f"   Response: {pages_response.text}")
                         # Don't fail the connection, just log the issue
                         
             except httpx.TimeoutException:
-                print(f"⚠️  Timeout while fetching Facebook pages. Connection saved but no page selected.")
+                print(f"  Timeout while fetching Facebook pages. Connection saved but no page selected.")
             except httpx.HTTPError as e:
-                print(f"⚠️  HTTP error while fetching Facebook pages: {e}")
+                print(f"  HTTP error while fetching Facebook pages: {e}")
             except Exception as e:
-                print(f"⚠️  Unexpected error while fetching Facebook pages: {e}")
+                print(f"  Unexpected error while fetching Facebook pages: {e}")
                 import traceback
                 traceback.print_exc()
                 # Don't fail the connection - user can select page later
