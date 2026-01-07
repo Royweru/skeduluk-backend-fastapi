@@ -242,6 +242,7 @@ async def oauth_callback(
     Returns HTML that closes popup and communicates with parent window
     """
     # Check for user denial
+     # Check for user denial
     if denied:
         print(f"❌ User denied authorization")
         return RedirectResponse(
@@ -254,9 +255,10 @@ async def oauth_callback(
         return RedirectResponse(
             url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote(error_msg)}"
         )
-    #  Validate that we have EITHER OAuth 1.0a OR OAuth 2.0 parameters
+    
+    # ✅ Validate that we have EITHER OAuth 1.0a OR OAuth 2.0 parameters
     is_oauth1 = bool(oauth_token and oauth_verifier)
-    is_oauth2 = bool(code)
+    is_oauth2 = bool(code and state)  # OAuth 2.0 requires state
     
     if not is_oauth1 and not is_oauth2:
         print(f"❌ Missing required parameters")
@@ -268,12 +270,17 @@ async def oauth_callback(
             url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote('Missing authorization parameters')}"
         )
     
-    #  State is required for both protocols
-    if not state:
-        print(f" Missing state parameter")
+    if not is_oauth1 and not is_oauth2:
+        print(f"❌ Missing required parameters")
+        print(f"   OAuth 1.0a needs: oauth_token + oauth_verifier")
+        print(f"   OAuth 2.0 needs: code + state")
+        print(f"   Got: code={bool(code)}, state={bool(state)}, oauth_token={bool(oauth_token)}, oauth_verifier={bool(oauth_verifier)}")
+        
         return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote('Invalid connection link - missing state')}"
+            url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote('Missing authorization parameters')}"
         )
+    
+    
     result = await OAuthService.handle_oauth_callback(
             platform=platform,
             code=code,
