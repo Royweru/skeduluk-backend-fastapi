@@ -23,27 +23,23 @@ CALLBACK_PATH = "/auth/oauth/callback"
 # app/services/oauth_service.py
 
 OAUTH_CONFIGS = {
-    "twitter": {
-        "client_id": settings.TWITTER_CLIENT_ID,
-        "client_secret": settings.TWITTER_CLIENT_SECRET,
-        "auth_url": "https://twitter.com/i/oauth2/authorize",
-        "token_url": "https://api.twitter.com/2/oauth2/token",
-        "revoke_url": "https://api.twitter.com/2/oauth2/revoke",
-        "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/twitter",
-        "scope": "tweet.read tweet.write users.read offline.access",
-        "user_info_url": "https://api.twitter.com/2/users/me?user.fields=id,name,username,profile_image_url",
-        "uses_pkce": True,
-        "token_auth_method": "basic",
-        "response_type": "code"
-    },
-    "twitter_oauth1": {
-    "consumer_key": settings.TWITTER_CONSUMER_KEY,
-    "consumer_secret": settings.TWITTER_CONSUMER_SECRET,
-    "request_token_url": "https://api.twitter.com/oauth/request_token",
-    "authorize_url": "https://api.twitter.com/oauth/authorize",
-    "access_token_url": "https://api.twitter.com/oauth/access_token",
-    "callback_uri": f"{BASE_URL}{CALLBACK_PATH}/twitter",
-    "protocol": "oauth1"
+      "twitter": {
+        "protocol": "oauth1",  # ✅ OAuth 1.0a, not OAuth 2.0
+        "consumer_key": settings.TWITTER_API_KEY,  # From Developer Portal
+        "consumer_secret": settings.TWITTER_API_SECRET,  # From Developer Portal
+        
+        # OAuth 1.0a URLs
+        "request_token_url": "https://api.twitter.com/oauth/request_token",
+        "authorize_url": "https://api.twitter.com/oauth/authorize",
+        "access_token_url": "https://api.twitter.com/oauth/access_token",
+        
+        # Callback
+        "callback_uri": f"{BASE_URL}{CALLBACK_PATH}/twitter",
+        
+        # User info (use API v2 endpoint)
+        "user_info_url": "https://api.twitter.com/2/users/me",
+        
+        "platform_display_name": "Twitter/X"
     },
 
     "facebook": {
