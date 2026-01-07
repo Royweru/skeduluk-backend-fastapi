@@ -348,9 +348,9 @@ class OAuthService:
                 db=db,
                 user_id=user_id,
                 platform=platform.upper(),
-                access_token=combined_token,  #  "token:secret" format
-                refresh_token=None,  # OAuth 1.0a doesn't use refresh tokens
-                expires_in=None,  # OAuth 1.0a tokens don't expire
+                access_token=combined_token,  
+                refresh_token=None,  # OAuth 1.0a have  no refresh tokens
+                expires_in=None,  # OAuth 1.0a tokens never expire
                 platform_user_id=user_info["user_id"],
                 platform_username=user_info["username"],
                 platform_name=user_info["name"],
