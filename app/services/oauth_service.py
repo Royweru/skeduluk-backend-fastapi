@@ -21,7 +21,14 @@ CALLBACK_PATH = "/auth/oauth/callback"
 
 # 🔧 IMPROVED: Better OAuth configurations with comments
 # app/services/oauth_service.py
+_oauth1_states = {}
 
+def _clean_oauth1_states():
+    """Remove expired OAuth 1.0a states (older than 15 minutes)"""
+    cutoff = datetime.utcnow() - timedelta(minutes=15)
+    expired = [k for k, v in _oauth1_states.items() if v.get("created_at", datetime.utcnow()) < cutoff]
+    for k in expired:
+        del _oauth1_states[k]
 OAUTH_CONFIGS = {
     # ========================================================================
     # TWITTER - OAuth 1.0a (Three-Legged Flow)
@@ -183,13 +190,13 @@ class OAuthService:
     @classmethod
     async def handle_oauth_callback(
         cls, platform: str, 
-        code: Optional[str], state: str,
+        code: Optional[str], state: Optional[str],
         oauth_token: Optional[str], oauth_verifier: Optional[str],
         db: AsyncSession, error: Optional[str] = None
     ) -> Dict:
         """
         Main entry point for handling OAuth callbacks.
-        Routes to OAuth 1.0a or 2.0 based on parameters received.
+        ✅ FIXED: State is optional for OAuth 1.0a
         """
         if error:
             return {"success": False, "error": f"Authorization denied: {error}"}
@@ -208,13 +215,22 @@ class OAuthService:
         print(f"📥 OAuth Callback - {platform.upper()}")
         print(f"OAuth 1.0a params: {is_oauth1}")
         print(f"OAuth 2.0 params: {is_oauth2}")
+        print(f"State present: {bool(state)}")
         print(f"{'='*60}\n")
         
         if is_oauth1:
+            # ✅ OAuth 1.0a doesn't use state parameter
             return await cls._handle_oauth1_callback(
-                platform, oauth_token, oauth_verifier, state, config, db
+                platform, oauth_token, oauth_verifier, config, db
             )
         elif is_oauth2:
+            # ✅ OAuth 2.0 requires state parameter
+            if not state:
+                return {
+                    "success": False,
+                    "error": "Missing state parameter for OAuth 2.0 flow"
+                }
+            
             return await cls._handle_oauth2_callback(
                 platform, code, state, config, db
             )
@@ -230,7 +246,10 @@ class OAuthService:
     
     @classmethod
     async def _initiate_oauth1(cls, user_id: int, platform: str, config: Dict) -> str:
-        """OAuth 1.0a Three-Legged Flow - Step 1 & 2"""
+        """
+        OAuth 1.0a Three-Legged Flow - Step 1 & 2
+        ✅ FIXED: Store state server-side keyed by oauth_token
+        """
         try:
             from requests_oauthlib import OAuth1Session
             
@@ -249,49 +268,60 @@ class OAuthService:
             if not oauth_token or not oauth_token_secret:
                 raise HTTPException(500, "Failed to get request token")
             
-            # Step 3: Store request token secret in state JWT
-            state_payload = {
+            # ✅ FIX: Store state server-side using oauth_token as key
+            # Twitter will return this oauth_token in the callback!
+            _clean_oauth1_states()  # Clean up old states
+            _oauth1_states[oauth_token] = {
                 "user_id": user_id,
                 "platform": platform,
-                "oauth_token": oauth_token,
                 "oauth_token_secret": oauth_token_secret,
-                "exp": datetime.utcnow() + timedelta(minutes=15)
+                "created_at": datetime.utcnow()
             }
-            state_jwt = jwt.encode(state_payload, settings.SECRET_KEY, algorithm="HS256")
             
-            # Step 4: Build authorization URL
+            print(f"✅ OAuth 1.0a: Stored state for token: {oauth_token[:20]}...")
+            print(f"   User ID: {user_id}")
+            print(f"   Active states: {len(_oauth1_states)}")
+            
             authorization_url = oauth.authorization_url(config["authorize_url"])
             
-            # Add state parameter
-            parsed = urlparse(authorization_url)
-            params = parse_qs(parsed.query)
-            params['state'] = [state_jwt]
-            new_query = urlencode(params, doseq=True)
-            authorization_url = urlunparse((
-                parsed.scheme, parsed.netloc, parsed.path,
-                parsed.params, new_query, parsed.fragment
-            ))
-            
-            print(f" OAuth 1.0a authorization URL generated")
+            print(f"✅ OAuth 1.0a authorization URL generated")
             return authorization_url
             
         except Exception as e:
-            print(f" OAuth 1.0a error: {e}")
+            print(f"❌ OAuth 1.0a error: {e}")
             raise HTTPException(500, f"Failed to initiate OAuth: {str(e)}")
     
     @classmethod
     async def _handle_oauth1_callback(
         cls, platform: str, oauth_token: str, oauth_verifier: str,
-        state: str, config: Dict, db: AsyncSession
+        config: Dict, db: AsyncSession
     ) -> Dict:
-        """OAuth 1.0a Three-Legged Flow - Step 3"""
+        """
+        OAuth 1.0a Three-Legged Flow - Step 3
+        ✅ FIXED: Retrieve state from server-side storage using oauth_token
+        """
         try:
             from requests_oauthlib import OAuth1Session
             
-            # Decode state
-            state_payload = jwt.decode(state, settings.SECRET_KEY, algorithms=["HS256"])
-            user_id = state_payload["user_id"]
-            oauth_token_secret = state_payload["oauth_token_secret"]
+            # ✅ FIX: Retrieve state using oauth_token (not from URL parameter)
+            state_data = _oauth1_states.get(oauth_token)
+            
+            if not state_data:
+                print(f"❌ OAuth 1.0a: No state found for token: {oauth_token[:20]}...")
+                print(f"   Active states: {list(_oauth1_states.keys())}")
+                return {
+                    "success": False,
+                    "error": "Invalid or expired authorization session. Please try connecting again."
+                }
+            
+            # Extract from stored state
+            user_id = state_data["user_id"]
+            oauth_token_secret = state_data["oauth_token_secret"]
+            
+            # Clean up - remove used state
+            del _oauth1_states[oauth_token]
+            
+            print(f"✅ OAuth 1.0a: Retrieved state for user {user_id}")
             
             # Exchange for access token
             oauth = OAuth1Session(
@@ -309,7 +339,7 @@ class OAuthService:
             if not access_token or not access_token_secret:
                 return {"success": False, "error": "Failed to get access tokens"}
             
-            #  CRITICAL: Format as "token:secret" for TwitterService
+            # CRITICAL: Format as "token:secret" for TwitterService
             combined_token = f"{access_token}:{access_token_secret}"
             
             # Get user info
@@ -349,8 +379,8 @@ class OAuthService:
                 user_id=user_id,
                 platform=platform.upper(),
                 access_token=combined_token,  
-                refresh_token=None,  # OAuth 1.0a have  no refresh tokens
-                expires_in=None,  # OAuth 1.0a tokens never expire
+                refresh_token=None,
+                expires_in=None,
                 platform_user_id=user_info["user_id"],
                 platform_username=user_info["username"],
                 platform_name=user_info["name"],
@@ -358,7 +388,7 @@ class OAuthService:
                 oauth_token_secret=access_token_secret
             )
             
-            print(f" OAuth 1.0a connection saved")
+            print(f"✅ OAuth 1.0a connection saved")
             
             return {
                 "success": True,
@@ -366,14 +396,11 @@ class OAuthService:
                 "username": user_info["username"]
             }
             
-        except JWTError:
-            return {"success": False, "error": "Invalid or expired connection link"}
         except Exception as e:
-            print(f" OAuth 1.0a callback error: {e}")
+            print(f"❌ OAuth 1.0a callback error: {e}")
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e)}
-    
     # ========================================================================
     # OAUTH 2.0 IMPLEMENTATION (ALL OTHER PLATFORMS)
     # ========================================================================
