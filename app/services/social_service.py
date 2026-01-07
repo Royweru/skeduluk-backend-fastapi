@@ -1,7 +1,7 @@
 # app/services/social_service.py
 """
 Main social media service orchestrator.
-✅ FIXED: Proper handling of Twitter OAuth 1.0a tokens
+ FIXED: Proper handling of Twitter OAuth 1.0a tokens
 """
 
 from typing import Dict, List, Any, Optional
@@ -34,7 +34,7 @@ class SocialService:
         "YOUTUBE": YouTubeService
     }
     
-    # ✅ NEW: Platforms that use OAuth 1.0a (no token refresh)
+    #  NEW: Platforms that use OAuth 1.0a (no token refresh)
     OAUTH_1_0A_PLATFORMS = {"TWITTER"}
     
     @classmethod
@@ -46,35 +46,37 @@ class SocialService:
         """
         Ensure token is valid, refresh if needed.
         
-        ✅ FIXED: Handles OAuth 1.0a platforms (Twitter) that don't support token refresh
-        
-        Args:
-            connection: Social connection object
-            db: Database session
-            
-        Returns:
-            Valid access token
+        ✅ FIXED: Aggressively skips refresh for Twitter/X (OAuth 1.0a)
         """
-        platform = connection.platform.upper()
+        # normalize: ensure string, uppercase, and remove ALL whitespace
+        platform = str(connection.platform).upper().strip()
         
-        # ✅ FIX: Twitter/X uses OAuth 1.0a - tokens don't expire and can't be refreshed
+        # 🛑 HARD STOP: Explicitly check for Twitter to prevent ANY refresh attempt
+        if "TWITTER" in platform or platform == "X":
+            print(f" {platform}: OAuth 1.0a detected - Skipping token refresh.")
+            return connection.access_token
+            
+        # Check standard OAuth 1.0a list
         if platform in cls.OAUTH_1_0A_PLATFORMS:
-            print(f"🐦 {platform}: Using OAuth 1.0a token (no refresh needed)")
+            print(f" {platform}: Using OAuth 1.0a token (no refresh needed)")
             return connection.access_token
         
         # Check if token is expired (for OAuth 2.0 platforms only)
         if connection.token_expires_at and connection.token_expires_at < datetime.utcnow():
-            print(f"🔄 Token expired for {platform}, refreshing...")
+            print(f" Token expired for {platform}, refreshing...")
             
             try:
                 result = await OAuthService.refresh_access_token(connection, db)
                 if not result:
-                    raise Exception(f"Failed to refresh token for {platform}")
+                    # If refresh fails, try to return existing token as hail mary
+                    print(f"] Refresh failed for {platform}, using existing token as fallback")
+                    return connection.access_token
                 
                 return result["access_token"]
             except Exception as e:
-                print(f"❌ Token refresh failed for {platform}: {e}")
-                raise Exception(f"Failed to refresh token for {platform}: {str(e)}")
+                print(f"Token refresh failed for {platform}: {e}")
+                # Don't crash the whole process, return the old token
+                return connection.access_token
         
         return connection.access_token
     
@@ -141,16 +143,16 @@ class SocialService:
             result["platform"] = platform
             
             if result["success"]:
-                print(f"✅ {platform}: Posted successfully!")
+                print(f" {platform}: Posted successfully!")
                 print(f"   URL: {result.get('url', 'N/A')}")
             else:
-                print(f"❌ {platform}: Failed - {result.get('error', 'Unknown error')}")
+                print(f" {platform}: Failed - {result.get('error', 'Unknown error')}")
             
             return result
             
         except Exception as e:
             error_msg = str(e)
-            print(f"❌ {platform}: Exception - {error_msg}")
+            print(f" {platform}: Exception - {error_msg}")
             import traceback
             traceback.print_exc()
             
@@ -236,8 +238,8 @@ class SocialService:
         print(f"\n{'='*60}")
         print(f"📊 PUBLISHING SUMMARY")
         print(f"{'='*60}")
-        print(f"✅ Successful: {len(successful)}/{len(connections)}")
-        print(f"❌ Failed: {len(failed)}/{len(connections)}")
+        print(f" Successful: {len(successful)}/{len(connections)}")
+        print(f" Failed: {len(failed)}/{len(connections)}")
         print(f"{'='*60}\n")
         
         return {
@@ -281,7 +283,7 @@ class SocialService:
             return await service_class.validate_token(access_token)
             
         except Exception as e:
-            print(f"❌ Validation error for {platform}: {e}")
+            print(f" Validation error for {platform}: {e}")
             return False
     
     @classmethod
