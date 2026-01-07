@@ -563,28 +563,8 @@ async def get_supported_platforms():
     
     return {"platforms": platforms}
 
-# Add this test endpoint
-@router.get("/oauth/test/twitter")
-async def test_twitter_oauth(
-    current_user: models.User = Depends(auth.get_current_active_user)
-):
-    """Generate Twitter OAuth URL for testing"""
-    try:
-        auth_url = await OAuthService.initiate_oauth(current_user.id, "twitter")
-        return {
-            "success": True,
-            "auth_url": auth_url,
-            "message": "Copy this URL and paste it in your browser to test"
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
-
-
 # ============== DEBUG ENDPOINTS ==============
-# Add these BEFORE your OAuth routes
+
 
 @router.get("/oauth/debug/{platform}")
 async def debug_oauth_config(platform: str):

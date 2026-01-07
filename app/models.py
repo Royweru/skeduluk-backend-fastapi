@@ -49,7 +49,9 @@ class SocialConnection(Base):
     platform = Column(String, nullable=False)  # TWITTER, FACEBOOK, LINKEDIN
     platform_user_id = Column(String, nullable=False)
     username = Column(String, nullable=False)
+    twitter_protocol = Column(String)
     access_token = Column(Text, nullable=False)
+    access_token_secret = Column(String, nullable=True)
     refresh_token = Column(Text, nullable=True)
     token_expires_at = Column(DateTime, nullable=True)
     platform_avatar_url = Column(String, nullable=True)

@@ -36,6 +36,16 @@ OAUTH_CONFIGS = {
         "token_auth_method": "basic",
         "response_type": "code"
     },
+    "twitter_oauth1": {
+    "consumer_key": settings.TWITTER_CONSUMER_KEY,
+    "consumer_secret": settings.TWITTER_CONSUMER_SECRET,
+    "request_token_url": "https://api.twitter.com/oauth/request_token",
+    "authorize_url": "https://api.twitter.com/oauth/authorize",
+    "access_token_url": "https://api.twitter.com/oauth/access_token",
+    "callback_uri": f"{BASE_URL}{CALLBACK_PATH}/twitter",
+    "protocol": "oauth1"
+    },
+
     "facebook": {
         "client_id": settings.FACEBOOK_APP_ID,
         "client_secret": settings.FACEBOOK_APP_SECRET,
@@ -84,22 +94,37 @@ OAUTH_CONFIGS = {
         "platform_display_name": "LinkedIn",
         "auth_params": {}
     },
-    "youtube": {
-    "client_id": settings.GOOGLE_CLIENT_ID,
-    "client_secret": settings.GOOGLE_CLIENT_SECRET,
-    "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
-    "token_url": "https://oauth2.googleapis.com/token",
-    "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/youtube",
-    "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
-    "user_info_url": "https://www.googleapis.com/oauth2/v3/userinfo",
-    "uses_pkce": False,
-    "token_auth_method": "body",
-    "response_type": "code",
-    "auth_params": {
-        "access_type": "offline",
-        "prompt": "consent"
+    #  ✅ TIKTOK OAUTH CONFIGURATION
+    "tiktok": {
+        "client_id": settings.TIKTOK_CLIENT_ID,
+        "client_secret": settings.TIKTOK_CLIENT_SECRET,
+        "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
+        "token_url": "https://open.tiktok.com/v2/oauth/token/",
+        "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/tiktok",
+        "scope": "user.info.basic,video.upload,video.publish",
+        "user_info_url": "https://open.tiktok.com/v2/user/info/",
+        "uses_pkce": True,  # ✅ TikTok requires PKCE
+        "token_auth_method": "basic",  # ✅ TikTok uses Basic Auth
+        "response_type": "code",
+        "platform_display_name": "TikTok",
+        "auth_params": {}
     },
-    "platform_display_name": "YouTube"
+    "youtube": {
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+        "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_url": "https://oauth2.googleapis.com/token",
+        "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/youtube",
+        "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
+        "user_info_url": "https://www.googleapis.com/oauth2/v3/userinfo",
+        "uses_pkce": False,
+        "token_auth_method": "body",
+        "response_type": "code",
+        "auth_params": {
+            "access_type": "offline",
+            "prompt": "consent"
+        },
+        "platform_display_name": "YouTube"
     }
 }
 
@@ -588,6 +613,16 @@ class OAuthService:
                     "username": data.get("email"),
                     "name": data.get("name"),
                     "email": data.get("email")
+                }
+            #  ✅ TIKTOK USER INFO PARSING
+            elif platform == "tiktok":
+                # TikTok returns nested data structure
+                user_data = data.get("data", {}).get("user", {})
+                return {
+                    "user_id": user_data.get("open_id"),
+                    "username": user_data.get("display_name"),
+                    "name": user_data.get("display_name"),
+                    "email": None  # TikTok doesn't provide email
                 }
 
                 
