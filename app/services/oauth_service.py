@@ -134,6 +134,7 @@ OAUTH_CONFIGS = {
         "uses_pkce": True,
         "token_auth_method": "basic",
         "response_type": "code",
+        "client_id_param_name": "client_key",  
         "auth_params": {},
         "platform_display_name": "TikTok"
     }
@@ -600,7 +601,6 @@ class OAuthService:
         
         config = OAUTH_CONFIGS[platform]
         
-        # 🔍 DEBUG: Print what we're a'\\\'';;;;
         print(f"Attempting token refresh for {platform}")
         print(f"   Refresh token length: {len(refresh_token)}")
         print(f"   Token URL: {config['token_url']}")
