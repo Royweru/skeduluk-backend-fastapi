@@ -107,7 +107,7 @@ class SocialService:
         platform = connection.platform.upper()
         
         print(f"\n{'='*60}")
-        print(f"🚀 Publishing to {platform}")
+        print(f" Publishing to {platform}")
         print(f"{'='*60}")
         
         # Get platform service
@@ -191,7 +191,7 @@ class SocialService:
         import asyncio
         
         print(f"\n{'='*60}")
-        print(f"🚀 Multi-Platform Publishing")
+        print(f" Multi-Platform Publishing")
         print(f"📝 Content: {content[:50]}...")
         print(f"🖼️ Images: {len(image_urls) if image_urls else 0}")
         print(f"🎬 Videos: {len(video_urls) if video_urls else 0}")
