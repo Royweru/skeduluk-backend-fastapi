@@ -4,7 +4,7 @@ import hashlib
 import base64
 from typing import Dict, Optional, Tuple
 from datetime import datetime, timedelta
-from urllib.parse import urlencode, quote
+from urllib.parse import parse_qs, urlencode, quote, urlparse, urlunparse
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -23,60 +23,66 @@ CALLBACK_PATH = "/auth/oauth/callback"
 # app/services/oauth_service.py
 
 OAUTH_CONFIGS = {
-      "twitter": {
-        "protocol": "oauth1",  # ✅ OAuth 1.0a, not OAuth 2.0
-        "consumer_key": settings.TWITTER_API_KEY,  # From Developer Portal
-        "consumer_secret": settings.TWITTER_API_SECRET,  # From Developer Portal
-        
-        # OAuth 1.0a URLs
+    # ========================================================================
+    # TWITTER - OAuth 1.0a (Three-Legged Flow)
+    # ========================================================================
+    "twitter": {
+        "protocol": "oauth1",  
+        "consumer_key": settings.TWITTER_API_KEY,
+        "consumer_secret": settings.TWITTER_API_SECRET,
         "request_token_url": "https://api.twitter.com/oauth/request_token",
         "authorize_url": "https://api.twitter.com/oauth/authorize",
         "access_token_url": "https://api.twitter.com/oauth/access_token",
-        
-        # Callback
         "callback_uri": f"{BASE_URL}{CALLBACK_PATH}/twitter",
-        
-        # User info (use API v2 endpoint)
         "user_info_url": "https://api.twitter.com/2/users/me",
-        
         "platform_display_name": "Twitter/X"
     },
-
+    
+    # ========================================================================
+    # FACEBOOK - OAuth 2.0
+    # ========================================================================
     "facebook": {
+        "protocol": "oauth2",  
         "client_id": settings.FACEBOOK_APP_ID,
         "client_secret": settings.FACEBOOK_APP_SECRET,
         "auth_url": "https://www.facebook.com/v20.0/dialog/oauth",
         "token_url": "https://graph.facebook.com/v20.0/oauth/access_token",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/facebook",
-        "scope": "public_profile,email,pages_show_list",
+        "scope": "public_profile,email,pages_show_list,pages_manage_posts",
         "user_info_url": "https://graph.facebook.com/v20.0/me?fields=id,name,email,picture",
         "uses_pkce": False,
         "token_auth_method": "body",
         "response_type": "code",
         "exchange_token": True,
-        "auth_params": {
-            "auth_type": "rerequest",
-        }
+        "auth_params": {"auth_type": "rerequest"},
+        "platform_display_name": "Facebook"
     },
+    
+    # ========================================================================
+    # INSTAGRAM - OAuth 2.0
+    # ========================================================================
     "instagram": {
+        "protocol": "oauth2",
         "client_id": settings.FACEBOOK_APP_ID,
         "client_secret": settings.FACEBOOK_APP_SECRET,
         "auth_url": "https://www.facebook.com/v20.0/dialog/oauth",
         "token_url": "https://graph.facebook.com/v20.0/oauth/access_token",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/instagram",
-        "scope": "instagram_basic,pages_show_list,business_management",
+        "scope": "instagram_basic,pages_show_list,instagram_content_publish,business_management",
         "user_info_url": "https://graph.facebook.com/v20.0/me?fields=id,name,email,picture",
         "uses_pkce": False,
         "token_auth_method": "body",
         "response_type": "code",
         "exchange_token": True,
-        "platform_display_name": "Instagram",
-        "auth_params": {
-            "auth_type": "rerequest",
-        }
+        "auth_params": {"auth_type": "rerequest"},
+        "platform_display_name": "Instagram"
     },
-    #  ADD LINKEDIN HERE
+    
+    # ========================================================================
+    # LINKEDIN - OAuth 2.0
+    # ========================================================================
     "linkedin": {
+        "protocol": "oauth2",
         "client_id": settings.LINKEDIN_CLIENT_ID,
         "client_secret": settings.LINKEDIN_CLIENT_SECRET,
         "auth_url": "https://www.linkedin.com/oauth/v2/authorization",
@@ -85,33 +91,23 @@ OAUTH_CONFIGS = {
         "scope": "openid profile email w_member_social",
         "user_info_url": "https://api.linkedin.com/v2/userinfo",
         "uses_pkce": False,
-        "token_auth_method": "body",  # LinkedIn uses body params, not Basic Auth
+        "token_auth_method": "body",
         "response_type": "code",
-        "platform_display_name": "LinkedIn",
-        "auth_params": {}
+        "auth_params": {},
+        "platform_display_name": "LinkedIn"
     },
-    #  ✅ TIKTOK OAUTH CONFIGURATION
-    "tiktok": {
-        "client_id": settings.TIKTOK_CLIENT_ID,
-        "client_secret": settings.TIKTOK_CLIENT_SECRET,
-        "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
-        "token_url": "https://open.tiktok.com/v2/oauth/token/",
-        "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/tiktok",
-        "scope": "user.info.basic,video.upload,video.publish",
-        "user_info_url": "https://open.tiktok.com/v2/user/info/",
-        "uses_pkce": True,  # ✅ TikTok requires PKCE
-        "token_auth_method": "basic",  # ✅ TikTok uses Basic Auth
-        "response_type": "code",
-        "platform_display_name": "TikTok",
-        "auth_params": {}
-    },
+    
+    # ========================================================================
+    # YOUTUBE (Google) - OAuth 2.0
+    # ========================================================================
     "youtube": {
+        "protocol": "oauth2",
         "client_id": settings.GOOGLE_CLIENT_ID,
         "client_secret": settings.GOOGLE_CLIENT_SECRET,
         "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
         "token_url": "https://oauth2.googleapis.com/token",
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/youtube",
-        "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email",
+        "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile",
         "user_info_url": "https://www.googleapis.com/oauth2/v3/userinfo",
         "uses_pkce": False,
         "token_auth_method": "body",
@@ -121,12 +117,415 @@ OAUTH_CONFIGS = {
             "prompt": "consent"
         },
         "platform_display_name": "YouTube"
+    },
+    
+    # ========================================================================
+    # TIKTOK - OAuth 2.0 with PKCE
+    # ========================================================================
+    "tiktok": {
+        "protocol": "oauth2",
+        "client_id": settings.TIKTOK_CLIENT_ID,
+        "client_secret": settings.TIKTOK_CLIENT_SECRET,
+        "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
+        "token_url": "https://open.tiktok.com/v2/oauth/token/",
+        "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/tiktok",
+        "scope": "user.info.basic,video.upload,video.publish",
+        "user_info_url": "https://open.tiktok.com/v2/user/info/",
+        "uses_pkce": True,
+        "token_auth_method": "basic",
+        "response_type": "code",
+        "auth_params": {},
+        "platform_display_name": "TikTok"
     }
 }
 
 
+
 class OAuthService:
     """OAuth Service with improved PKCE and state management"""
+    """
+    Universal OAuth service supporting both OAuth 1.0a and OAuth 2.0.
+    
+    Architecture:
+    - Twitter uses OAuth 1.0a (three-legged flow)
+    - All other platforms use OAuth 2.0 (authorization code flow)
+    - Service intelligently routes based on `protocol` field in config
+    """
+    
+    # ========================================================================
+    # MAIN ENTRY POINTS
+    # ========================================================================
+    
+    @classmethod
+    async def initiate_oauth(cls, user_id: int, platform: str) -> str:
+        """
+        Main entry point for initiating OAuth flow.
+        Routes to OAuth 1.0a or 2.0 based on platform configuration.
+        """
+        platform = platform.lower()
+        
+        if platform not in OAUTH_CONFIGS:
+            raise HTTPException(500, f"Platform {platform} not configured")
+        
+        config = OAUTH_CONFIGS[platform]
+        protocol = config.get("protocol", "oauth2")
+        
+        print(f"\n{'='*60}")
+        print(f"🚀 Initiating {protocol.upper()} flow for {platform.upper()}")
+        print(f"{'='*60}\n")
+        
+        if protocol == "oauth1":
+            return await cls._initiate_oauth1(user_id, platform, config)
+        else:
+            return await cls._initiate_oauth2(user_id, platform, config)
+    
+    @classmethod
+    async def handle_oauth_callback(
+        cls, platform: str, 
+        code: Optional[str], state: str,
+        oauth_token: Optional[str], oauth_verifier: Optional[str],
+        db: AsyncSession, error: Optional[str] = None
+    ) -> Dict:
+        """
+        Main entry point for handling OAuth callbacks.
+        Routes to OAuth 1.0a or 2.0 based on parameters received.
+        """
+        if error:
+            return {"success": False, "error": f"Authorization denied: {error}"}
+        
+        platform = platform.lower()
+        if platform not in OAUTH_CONFIGS:
+            return {"success": False, "error": f"Unsupported platform: {platform}"}
+        
+        config = OAUTH_CONFIGS[platform]
+        
+        # Determine protocol based on parameters
+        is_oauth1 = bool(oauth_token and oauth_verifier)
+        is_oauth2 = bool(code)
+        
+        print(f"\n{'='*60}")
+        print(f"📥 OAuth Callback - {platform.upper()}")
+        print(f"OAuth 1.0a params: {is_oauth1}")
+        print(f"OAuth 2.0 params: {is_oauth2}")
+        print(f"{'='*60}\n")
+        
+        if is_oauth1:
+            return await cls._handle_oauth1_callback(
+                platform, oauth_token, oauth_verifier, state, config, db
+            )
+        elif is_oauth2:
+            return await cls._handle_oauth2_callback(
+                platform, code, state, config, db
+            )
+        else:
+            return {
+                "success": False,
+                "error": "Missing required OAuth parameters"
+            }
+    
+    # ========================================================================
+    # OAUTH 1.0a IMPLEMENTATION (TWITTER)
+    # ========================================================================
+    
+    @classmethod
+    async def _initiate_oauth1(cls, user_id: int, platform: str, config: Dict) -> str:
+        """OAuth 1.0a Three-Legged Flow - Step 1 & 2"""
+        try:
+            from requests_oauthlib import OAuth1Session
+            
+            # Step 1: Create OAuth1 session
+            oauth = OAuth1Session(
+                config["consumer_key"],
+                client_secret=config["consumer_secret"],
+                callback_uri=config["callback_uri"]
+            )
+            
+            # Step 2: Get request token
+            fetch_response = oauth.fetch_request_token(config["request_token_url"])
+            oauth_token = fetch_response.get('oauth_token')
+            oauth_token_secret = fetch_response.get('oauth_token_secret')
+            
+            if not oauth_token or not oauth_token_secret:
+                raise HTTPException(500, "Failed to get request token")
+            
+            # Step 3: Store request token secret in state JWT
+            state_payload = {
+                "user_id": user_id,
+                "platform": platform,
+                "oauth_token": oauth_token,
+                "oauth_token_secret": oauth_token_secret,
+                "exp": datetime.utcnow() + timedelta(minutes=15)
+            }
+            state_jwt = jwt.encode(state_payload, settings.SECRET_KEY, algorithm="HS256")
+            
+            # Step 4: Build authorization URL
+            authorization_url = oauth.authorization_url(config["authorize_url"])
+            
+            # Add state parameter
+            parsed = urlparse(authorization_url)
+            params = parse_qs(parsed.query)
+            params['state'] = [state_jwt]
+            new_query = urlencode(params, doseq=True)
+            authorization_url = urlunparse((
+                parsed.scheme, parsed.netloc, parsed.path,
+                parsed.params, new_query, parsed.fragment
+            ))
+            
+            print(f"✅ OAuth 1.0a authorization URL generated")
+            return authorization_url
+            
+        except Exception as e:
+            print(f"❌ OAuth 1.0a error: {e}")
+            raise HTTPException(500, f"Failed to initiate OAuth: {str(e)}")
+    
+    @classmethod
+    async def _handle_oauth1_callback(
+        cls, platform: str, oauth_token: str, oauth_verifier: str,
+        state: str, config: Dict, db: AsyncSession
+    ) -> Dict:
+        """OAuth 1.0a Three-Legged Flow - Step 3"""
+        try:
+            from requests_oauthlib import OAuth1Session
+            
+            # Decode state
+            state_payload = jwt.decode(state, settings.SECRET_KEY, algorithms=["HS256"])
+            user_id = state_payload["user_id"]
+            oauth_token_secret = state_payload["oauth_token_secret"]
+            
+            # Exchange for access token
+            oauth = OAuth1Session(
+                config["consumer_key"],
+                client_secret=config["consumer_secret"],
+                resource_owner_key=oauth_token,
+                resource_owner_secret=oauth_token_secret,
+                verifier=oauth_verifier
+            )
+            
+            oauth_tokens = oauth.fetch_access_token(config["access_token_url"])
+            access_token = oauth_tokens.get('oauth_token')
+            access_token_secret = oauth_tokens.get('oauth_token_secret')
+            
+            if not access_token or not access_token_secret:
+                return {"success": False, "error": "Failed to get access tokens"}
+            
+            # ✅ CRITICAL: Format as "token:secret" for TwitterService
+            combined_token = f"{access_token}:{access_token_secret}"
+            
+            # Get user info
+            oauth_for_api = OAuth1Session(
+                config["consumer_key"],
+                client_secret=config["consumer_secret"],
+                resource_owner_key=access_token,
+                resource_owner_secret=access_token_secret
+            )
+            
+            user_response = oauth_for_api.get(config["user_info_url"], timeout=10)
+            
+            if user_response.status_code == 200:
+                user_data = user_response.json()
+                if "data" in user_data:
+                    user_info = {
+                        "user_id": user_data["data"]["id"],
+                        "username": user_data["data"]["username"],
+                        "name": user_data["data"]["name"]
+                    }
+                else:
+                    user_info = {
+                        "user_id": str(oauth_tokens.get("user_id", "")),
+                        "username": oauth_tokens.get("screen_name", ""),
+                        "name": oauth_tokens.get("screen_name", "")
+                    }
+            else:
+                user_info = {
+                    "user_id": str(oauth_tokens.get("user_id", "")),
+                    "username": oauth_tokens.get("screen_name", "Unknown"),
+                    "name": oauth_tokens.get("screen_name", "Unknown")
+                }
+            
+            # Save connection
+            connection = await cls._save_connection(
+                db=db,
+                user_id=user_id,
+                platform=platform.upper(),
+                access_token=combined_token,  # ✅ "token:secret" format
+                refresh_token=None,  # OAuth 1.0a doesn't use refresh tokens
+                expires_in=None,  # OAuth 1.0a tokens don't expire
+                platform_user_id=user_info["user_id"],
+                platform_username=user_info["username"],
+                platform_name=user_info["name"]
+            )
+            
+            print(f"✅ OAuth 1.0a connection saved")
+            
+            return {
+                "success": True,
+                "platform": platform,
+                "username": user_info["username"]
+            }
+            
+        except JWTError:
+            return {"success": False, "error": "Invalid or expired connection link"}
+        except Exception as e:
+            print(f"❌ OAuth 1.0a callback error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "error": str(e)}
+    
+    # ========================================================================
+    # OAUTH 2.0 IMPLEMENTATION (ALL OTHER PLATFORMS)
+    # ========================================================================
+    
+    @classmethod
+    async def _initiate_oauth2(cls, user_id: int, platform: str, config: Dict) -> str:
+        """OAuth 2.0 Authorization Code Flow - Step 1"""
+        try:
+            # Generate state
+            state = secrets.token_urlsafe(16)
+            state_payload = {
+                "user_id": user_id,
+                "platform": platform,
+                "state": state,
+                "exp": datetime.utcnow() + timedelta(minutes=15)
+            }
+            
+            # Build parameters
+            params = {
+                "response_type": config.get("response_type", "code"),
+                "client_id": config["client_id"],
+                "redirect_uri": config["redirect_uri"],
+                "state": state
+            }
+            
+            if config.get("scope"):
+                params["scope"] = config["scope"]
+            
+            params.update(config.get("auth_params", {}))
+            
+            # Handle PKCE
+            if config.get("uses_pkce", False):
+                code_verifier = cls._generate_code_verifier()
+                code_challenge = cls._generate_code_challenge(code_verifier)
+                params.update({
+                    "code_challenge": code_challenge,
+                    "code_challenge_method": "S256"
+                })
+                state_payload["pkce_verifier"] = code_verifier
+            
+            # Encode state
+            state_jwt = jwt.encode(state_payload, settings.SECRET_KEY, algorithm="HS256")
+            params["state"] = state_jwt
+            
+            # Build URL
+            query_string = urlencode(params, quote_via=quote)
+            auth_url = f"{config['auth_url']}?{query_string}"
+            
+            print(f"✅ OAuth 2.0 authorization URL generated")
+            return auth_url
+            
+        except Exception as e:
+            print(f"❌ OAuth 2.0 error: {e}")
+            raise HTTPException(500, f"Failed to initiate OAuth: {str(e)}")
+    
+    @classmethod
+    async def _handle_oauth2_callback(
+        cls, platform: str, code: str, state: str,
+        config: Dict, db: AsyncSession
+    ) -> Dict:
+        """OAuth 2.0 Authorization Code Flow - Step 2"""
+        try:
+            # Decode state
+            state_payload = jwt.decode(state, settings.SECRET_KEY, algorithms=["HS256"])
+            user_id = state_payload["user_id"]
+            code_verifier = state_payload.get("pkce_verifier")
+            
+            # Build token request
+            token_params = {
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": config["redirect_uri"],
+            }
+            
+            if config.get("token_auth_method") != "basic":
+                token_params["client_id"] = config["client_id"]
+                token_params["client_secret"] = config["client_secret"]
+            
+            if config.get("uses_pkce", False) and code_verifier:
+                token_params["code_verifier"] = code_verifier
+            
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json"
+            }
+            
+            auth = None
+            if config.get("token_auth_method") == "basic":
+                auth = (config["client_id"], config["client_secret"])
+            
+            # Exchange code for token
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                token_response = await client.post(
+                    config["token_url"],
+                    data=token_params,
+                    headers=headers,
+                    auth=auth
+                )
+                
+                if token_response.status_code != 200:
+                    return {
+                        "success": False,
+                        "error": f"Token exchange failed: {token_response.text}"
+                    }
+                
+                token_data = token_response.json()
+                access_token = token_data.get("access_token")
+                
+                if not access_token:
+                    return {"success": False, "error": "No access token received"}
+                
+                # Exchange for long-lived token (Facebook/Instagram)
+                if config.get("exchange_token"):
+                    access_token, token_data = await cls._exchange_long_lived_token(
+                        platform, access_token, config, client
+                    )
+                
+                # Get user info
+                user_info = await cls._get_platform_user_info(
+                    platform, access_token, config["user_info_url"], client
+                )
+                
+                if not user_info:
+                    return {"success": False, "error": "Failed to get user profile"}
+                
+                # Save connection
+                connection = await cls._save_connection(
+                    db=db,
+                    user_id=user_id,
+                    platform=platform.upper(),
+                    access_token=access_token,
+                    refresh_token=token_data.get("refresh_token"),
+                    expires_in=token_data.get("expires_in"),
+                    platform_user_id=user_info.get("user_id"),
+                    platform_username=user_info.get("username"),
+                    platform_name=user_info.get("name"),
+                    platform_email=user_info.get("email")
+                )
+                
+                print(f"✅ OAuth 2.0 connection saved")
+                
+                return {
+                    "success": True,
+                    "platform": platform,
+                    "username": user_info.get("username") or user_info.get("name")
+                }
+                
+        except JWTError:
+            return {"success": False, "error": "Invalid or expired connection link"}
+        except Exception as e:
+            print(f"❌ OAuth 2.0 callback error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "error": str(e)}
+    
 
     @staticmethod
     def _generate_code_verifier() -> str:
@@ -150,294 +549,6 @@ class OAuthService:
     def _generate_state() -> str:
         """Generate secure random state (at least 6 characters)"""
         return secrets.token_urlsafe(16)
-
-    @classmethod
-    def validate_config(cls, platform: str) -> Tuple[bool, Optional[str]]:
-        """Validate OAuth configuration for a platform"""
-        if platform not in OAUTH_CONFIGS:
-            return False, f"Platform '{platform}' not supported"
-
-        config = OAUTH_CONFIGS[platform]
-
-        # Check required fields
-        if not config.get("client_id"):
-            return False, f"Client ID not configured for {platform}"
-
-        if not config.get("client_secret"):
-            return False, f"Client Secret not configured for {platform}"
-
-        if not config.get("redirect_uri"):
-            return False, f"Redirect URI not configured for {platform}"
-
-        # Validate redirect URI format
-        redirect_uri = config["redirect_uri"]
-        if not redirect_uri.startswith(("http://", "https://")):
-            return False, f"Invalid redirect URI format: {redirect_uri}"
-
-        return True, None
-
-    @classmethod
-    async def initiate_oauth(cls, user_id: int, platform: str) -> str:
-        """Initiate OAuth flow with proper PKCE and state management"""
-        platform = platform.lower()
-
-        # Validate configuration
-        is_valid, error_message = cls.validate_config(platform)
-        if not is_valid:
-            raise HTTPException(status_code=500, detail=error_message)
-
-        config = OAUTH_CONFIGS[platform]
-
-        print("\n" + "="*70)
-        print(f"🚀 INITIATING OAUTH FOR {platform.upper()}")
-        print("="*70)
-        print(f"Client ID: {config['client_id'][:15]}..." if config.get(
-            'client_id') else "Client ID: NOT SET")
-        print(
-            f"Client Secret: {'SET' if config.get('client_secret') else 'NOT SET'}")
-        print(f"Redirect URI: {config['redirect_uri']}")
-        print(f"Scopes: {config.get('scope', 'NONE')}")
-        print(f"Uses PKCE: {config.get('uses_pkce', False)}")
-        print("="*70 + "\n")
-
-        # Generate state
-        state = cls._generate_state()
-
-        # State payload for JWT (expires in 15 minutes)
-        state_payload = {
-            "user_id": user_id,
-            "platform": platform,
-            "state": state,
-            "exp": datetime.utcnow() + timedelta(minutes=15)
-        }
-
-        # Build authorization parameters
-        params = {
-            "response_type": config.get("response_type", "code"),
-            "client_id": config["client_id"],
-            "redirect_uri": config["redirect_uri"],
-            "state": state
-        }
-
-        if config.get("scope"):
-            params["scope"] = config["scope"]
-
-        # Add any extra auth params
-        params.update(config.get("auth_params", {}))
-
-        # Handle PKCE
-        if config.get("uses_pkce", False):
-            code_verifier = cls._generate_code_verifier()
-            code_challenge = cls._generate_code_challenge(code_verifier)
-            params.update({
-                "code_challenge": code_challenge,
-                "code_challenge_method": "S256"
-            })
-            state_payload["pkce_verifier"] = code_verifier
-            print(
-                f" PKCE enabled - Verifier length: {len(code_verifier)}, Challenge length: {len(code_challenge)}")
-
-        # Encode the state payload into a JWT
-        state_jwt = jwt.encode(
-            state_payload, settings.SECRET_KEY, algorithm="HS256")
-        params["state"] = state_jwt
-
-        # Build authorization URL
-        query_string = urlencode(params, quote_via=quote)
-        auth_url = f"{config['auth_url']}?{query_string}"
-
-        print(f"🔗 Generated OAuth URL (first 150 chars): {auth_url[:150]}...")
-        print(f"📍 Full redirect will be to: {config['redirect_uri']}")
-        print()
-
-        return auth_url
-
-    @classmethod
-    async def handle_oauth_callback(
-        cls, platform: str, code: str, state: str, db: AsyncSession, error: Optional[str] = None
-    ) -> Dict:
-        """Handle OAuth callback with proper error handling"""
-        print("\n" + "="*70)
-        print(f"📥 OAUTH CALLBACK RECEIVED FOR {platform.upper()}")
-        print("="*70)
-        
-        if error:
-            print(f" Error parameter present: {error}")
-            return {"success": False, "error": f"Authorization denied: {error}"}
-
-        platform = platform.lower()
-        if platform not in OAUTH_CONFIGS:
-            return {"success": False, "error": f"Unsupported platform: {platform}"}
-
-        config = OAUTH_CONFIGS[platform]
-        
-        print(f"Code received (first 20 chars): {code[:20]}...")
-        print(f"State received (first 30 chars): {state[:30]}...")
-
-        # Decode and validate state JWT
-        try:
-            state_payload = jwt.decode(state, settings.SECRET_KEY, algorithms=["HS256"])
-            
-            if state_payload.get("platform") != platform:
-                raise JWTError("Platform mismatch in state token")
-            
-            user_id = state_payload["user_id"]
-            code_verifier = state_payload.get("pkce_verifier")
-            
-            print(f" State validated - User ID: {user_id}")
-            if code_verifier:
-                print(f" PKCE verifier retrieved (length: {len(code_verifier)})")
-
-        except JWTError as e:
-            print(f" Invalid state token: {e}")
-            return {"success": False, "error": "Invalid or expired connection link. Please try again."}
-
-        try:
-            #  FIXED: Build token params based on auth method
-            token_params = {
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": config["redirect_uri"],
-            }
-            
-            #  FIX: Only add credentials to body if NOT using Basic Auth
-            if config.get("token_auth_method") != "basic":
-                token_params["client_id"] = config["client_id"]
-                token_params["client_secret"] = config["client_secret"]
-            
-            # Add PKCE verifier if needed
-            if config.get("uses_pkce", False):
-                if not code_verifier:
-                    return {"success": False, "error": "PKCE verifier missing from state."}
-                token_params["code_verifier"] = code_verifier
-                print(f" Adding PKCE verifier to token request (length: {len(code_verifier)})")
-
-            headers = {
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "application/json"
-            }
-            
-            # Set up authentication
-            auth = None
-            if config.get("token_auth_method") == "basic":
-                #  For Basic Auth: credentials in header, NOT body
-                auth = (config["client_id"], config["client_secret"])
-                print(f" Using Basic Auth for token exchange (credentials in Authorization header)")
-                print(f"   Client ID: {config['client_id'][:15]}...")
-            else:
-                print(f" Using body parameters for token exchange")
-
-            print("\n" + "-"*70)
-            print("🔄 EXCHANGING CODE FOR TOKEN")
-            print("-"*70)
-            print(f"Token URL: {config['token_url']}")
-            print(f"Redirect URI: {config['redirect_uri']}")
-            print(f"Grant Type: authorization_code")
-            print(f"Auth Method: {config.get('token_auth_method', 'body')}")
-            print(f"PKCE Enabled: {config.get('uses_pkce', False)}")
-            print(f"Body Parameters: {list(token_params.keys())}")
-            print("-"*70 + "\n")
-
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                token_response = await client.post(
-                    config["token_url"],
-                    data=token_params,
-                    headers=headers,
-                    auth=auth
-                )
-
-                print(f"Token Response Status: {token_response.status_code}")
-                
-                if token_response.status_code != 200:
-                    error_body = token_response.text
-                    print(f" Token exchange failed!")
-                    print(f"Status Code: {token_response.status_code}")
-                    print(f"Response body: {error_body}")
-                    
-                    #  Enhanced debugging
-                    print(f"\n🔍 DEBUG INFO:")
-                    print(f"  Token URL: {config['token_url']}")
-                    print(f"  Redirect URI sent: {config['redirect_uri']}")
-                    print(f"  Client ID (first 15): {config['client_id'][:15]}...")
-                    print(f"  Auth Method: {config.get('token_auth_method')}")
-                    print(f"  Has Code Verifier: {bool(code_verifier)}")
-                    if code_verifier:
-                        print(f"  Code Verifier Length: {len(code_verifier)}")
-                    print(f"  Body Params: {list(token_params.keys())}")
-                    print("="*70 + "\n")
-                    
-                    # Try to parse error message
-                    try:
-                        error_data = token_response.json()
-                        error_msg = error_data.get("error_description") or error_data.get("error") or error_body
-                    except:
-                        error_msg = error_body
-                    
-                    return {"success": False, "error": f"Token exchange failed: {error_msg[:200]}"}
-                
-                token_data = token_response.json()
-                access_token = token_data.get("access_token")
-                
-                if not access_token:
-                    print(" No access token in response")
-                    print(f"Response: {token_data}")
-                    return {"success": False, "error": "No access token received"}
-                
-                print(f" Access token received (length: {len(access_token)})")
-                print(f"Token expires in: {token_data.get('expires_in', 'unknown')} seconds")
-                print(f"Refresh token: {'YES' if token_data.get('refresh_token') else 'NO'}")
-
-                # Exchange for long-lived token (Facebook/Instagram)
-                if config.get("exchange_token"):
-                    print("\n🔄 Exchanging for long-lived token...")
-                    access_token, token_data = await cls._exchange_long_lived_token(
-                        platform, access_token, config, client
-                    )
-
-                # Get user info
-                print("\n🔄 Fetching user info...")
-                user_info = await cls._get_platform_user_info(
-                    platform, access_token, config["user_info_url"], client
-                )
-                
-                if not user_info:
-                    print(" Failed to get user info")
-                    return {"success": False, "error": f"Failed to get user profile from {platform}"}
-                
-                print(f" User info retrieved: {user_info.get('username') or user_info.get('name')}")
-
-                # Save connection
-                print("\n💾 Saving connection to database...")
-                connection = await cls._save_connection(
-                    db=db,
-                    user_id=user_id,
-                    platform=platform,
-                    access_token=access_token,
-                    refresh_token=token_data.get("refresh_token"),
-                    expires_in=token_data.get("expires_in"),
-                    platform_user_id=user_info.get("user_id"),
-                    platform_username=user_info.get("username"),
-                    platform_name=user_info.get("name"),
-                    platform_email=user_info.get("email")
-                )
-                
-                print(f" Connection saved with ID: {connection.id}")
-                print("="*70 + "\n")
-                
-                return {
-                    "success": True,
-                    "platform": platform,
-                    "username": user_info.get("username") or user_info.get("name"),
-                }
-                
-        except httpx.TimeoutException:
-            print(" Connection timeout")
-            return {"success": False, "error": f"Connection timeout with {platform}"}
-        except Exception as e:
-            print(f" Unexpected error: {e}")
-            import traceback
-            traceback.print_exc()
-            return {"success": False, "error": f"An unexpected error occurred: {str(e)[:100]}"}
 
     @classmethod
     async def _exchange_long_lived_token(
