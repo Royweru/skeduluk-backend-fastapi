@@ -243,25 +243,27 @@ async def oauth_callback(
     """
     # Check for user denial
     if denied:
-        print(f" User denied authorization")
+        print(f"❌ User denied authorization")
         return RedirectResponse(
             url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote('You cancelled the connection')}"
         )
     
     if error:
         error_msg = error_description or error
-        print(f" OAuth error: {error_msg}")
+        print(f"❌ OAuth error: {error_msg}")
         return RedirectResponse(
             url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote(error_msg)}"
         )
-    
     #  Validate that we have EITHER OAuth 1.0a OR OAuth 2.0 parameters
     is_oauth1 = bool(oauth_token and oauth_verifier)
     is_oauth2 = bool(code)
     
     if not is_oauth1 and not is_oauth2:
-        print(f" Missing required parameters")
-        print(f"   Expected: (code + state) OR (oauth_token + oauth_verifier)")
+        print(f"❌ Missing required parameters")
+        print(f"   OAuth 1.0a needs: oauth_token + oauth_verifier")
+        print(f"   OAuth 2.0 needs: code + state")
+        print(f"   Got: code={bool(code)}, state={bool(state)}, oauth_token={bool(oauth_token)}, oauth_verifier={bool(oauth_verifier)}")
+        
         return RedirectResponse(
             url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote('Missing authorization parameters')}"
         )

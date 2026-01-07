@@ -288,7 +288,7 @@ class OAuthService:
             return authorization_url
             
         except Exception as e:
-            print(f"❌ OAuth 1.0a error: {e}")
+            print(f" OAuth 1.0a error: {e}")
             raise HTTPException(500, f"Failed to initiate OAuth: {str(e)}")
     
     @classmethod
@@ -307,7 +307,7 @@ class OAuthService:
             state_data = _oauth1_states.get(oauth_token)
             
             if not state_data:
-                print(f"❌ OAuth 1.0a: No state found for token: {oauth_token[:20]}...")
+                print(f" OAuth 1.0a: No state found for token: {oauth_token[:20]}...")
                 print(f"   Active states: {list(_oauth1_states.keys())}")
                 return {
                     "success": False,
@@ -397,7 +397,7 @@ class OAuthService:
             }
             
         except Exception as e:
-            print(f"❌ OAuth 1.0a callback error: {e}")
+            print(f" OAuth 1.0a callback error: {e}")
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e)}
