@@ -172,7 +172,7 @@ class OAuthService:
         protocol = config.get("protocol", "oauth2")
         
         print(f"\n{'='*60}")
-        print(f"🚀 Initiating {protocol.upper()} flow for {platform.upper()}")
+        print(f"Initiating {protocol.upper()} flow for {platform.upper()}")
         print(f"{'='*60}\n")
         
         if protocol == "oauth1":
