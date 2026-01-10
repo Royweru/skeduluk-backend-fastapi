@@ -41,7 +41,7 @@ class User(Base):
     posts = relationship("Post", back_populates="user")
     post_templates = relationship("PostTemplate", back_populates="user")  
     subscriptions = relationship("Subscription", back_populates="user")  
-
+    template_folders = relationship("TemplateFolder", back_populates="user")
 class SocialConnection(Base):
     __tablename__ = "social_connections"
     
@@ -94,7 +94,7 @@ class Post(Base):
     # Relationships - FIXED: Added missing post_results relationship
     user = relationship("User", back_populates="posts")
     post_results = relationship("PostResult", back_populates="post", cascade="all, delete-orphan")  
-
+    
 class PostResult(Base):
     __tablename__ = "post_results"
     

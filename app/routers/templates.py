@@ -6,7 +6,7 @@ import json
 
 from app import models, schemas, auth
 from app.database import get_async_db
-from app.crud.template_crud import TemplateCRUD, TemplateFolderCRUD
+from app.crud import TemplateCRUD, TemplateFolderCRUD
 from app.services.ai_service import ai_service
 
 router = APIRouter(prefix="/templates", tags=["templates"])
