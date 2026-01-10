@@ -39,7 +39,7 @@ app.include_router(users.router)
 app.include_router(posts.router)
 app.include_router(social.router)
 app.include_router(payments.router)
-
+app.include_router(templates.router)
 @app.get("/")
 async def root():
     return {"message": "Welcome to Skeduluk API"}

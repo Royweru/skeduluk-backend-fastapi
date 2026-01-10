@@ -1,5 +1,6 @@
 # app/models.py
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey,JSON ,Enum
+import enum
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime, timedelta
 from sqlalchemy.orm import relationship
@@ -127,38 +128,122 @@ class PostResult(Base):
     post = relationship("Post", back_populates="post_results")
 
 
+class TemplateCategory(str, enum.Enum):
+    PRODUCT_LAUNCH = "product_launch"
+    EVENT_PROMOTION = "event_promotion"
+    BLOG_POST = "blog_post"
+    ENGAGEMENT = "engagement"
+    EDUCATIONAL = "educational"
+    PROMOTIONAL = "promotional"
+    SEASONAL = "seasonal"
+    ANNOUNCEMENT = "announcement"
+    BEHIND_SCENES = "behind_scenes"
+    USER_GENERATED = "user_generated"
+    TESTIMONIAL = "testimonial"
+    INSPIRATIONAL = "inspirational"
+
+class TemplateTone(str, enum.Enum):
+    PROFESSIONAL = "professional"
+    CASUAL = "casual"
+    HUMOROUS = "humorous"
+    INSPIRATIONAL = "inspirational"
+    EDUCATIONAL = "educational"
+    URGENT = "urgent"
+    FRIENDLY = "friendly"
+
 class PostTemplate(Base):
     __tablename__ = "post_templates"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # NULL = system template
     
-    # Template info
-    name = Column(String, nullable=False)
-    content = Column(Text, nullable=False)
-    platforms = Column(Text, nullable=False)
-    is_public = Column(Boolean, default=False)
-    
-    # Optional fields
+    # Template Info
+    name = Column(String, nullable=False, index=True)
     description = Column(Text, nullable=True)
-    tone = Column(String, nullable=True)
-    default_hashtags = Column(Text, nullable=True)
+    category = Column(String, nullable=False, index=True)
     
-    # Media settings
-    include_image = Column(Boolean, default=False)
-    image_style = Column(String, nullable=True)
+    # Content Structure
+    content_template = Column(Text, nullable=False)  # Template with {variables}
+    variables = Column(JSON, nullable=True)  # List of variable definitions
+    
+    # Platform Variations
+    platform_variations = Column(JSON, nullable=True)  # Platform-specific versions
+    supported_platforms = Column(JSON, nullable=False)  # ["TWITTER", "LINKEDIN"]
     
     # Metadata
-    is_favorite = Column(Boolean, default=False)
+    tone = Column(String, default="engaging")
+    suggested_hashtags = Column(JSON, nullable=True)  # Array of hashtags
+    suggested_media_type = Column(String, nullable=True)  # "image", "video", "none"
+    
+    # Template Settings
+    is_public = Column(Boolean, default=False)  # Community templates
+    is_premium = Column(Boolean, default=False)
+    is_system = Column(Boolean, default=False)  # Official Skeduluk templates
+    
+    # Analytics
     usage_count = Column(Integer, default=0)
-    last_used_at = Column(DateTime, nullable=True)
+    success_rate = Column(Integer, default=0)  # Avg engagement %
+    avg_engagement = Column(JSON, nullable=True)  # {likes: 0, shares: 0, comments: 0}
+    
+    # UI/UX
+    thumbnail_url = Column(String, nullable=True)
+    color_scheme = Column(String, default="#3B82F6")  # Hex color
+    icon = Column(String, default="sparkles")  # Icon name
+    
+    # Favorites & Organization
+    is_favorite = Column(Boolean, default=False)
+    folder_id = Column(Integer, ForeignKey("template_folders.id"), nullable=True)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
     
     # Relationships
     user = relationship("User", back_populates="post_templates")
+    folder = relationship("TemplateFolder", back_populates="templates")
+    template_analytics = relationship("TemplateAnalytics", back_populates="template", cascade="all, delete-orphan")
+
+
+class TemplateFolder(Base):
+    __tablename__ = "template_folders"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    color = Column(String, default="#6366F1")
+    icon = Column(String, default="folder")
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User", back_populates="template_folders")
+    templates = relationship("PostTemplate", back_populates="folder")
+
+
+class TemplateAnalytics(Base):
+    __tablename__ = "template_analytics"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    template_id = Column(Integer, ForeignKey("post_templates.id"), nullable=False)
+    post_id = Column(Integer, ForeignKey("posts.id"), nullable=True)
+    
+    # Performance Metrics
+    views = Column(Integer, default=0)
+    likes = Column(Integer, default=0)
+    comments = Column(Integer, default=0)
+    shares = Column(Integer, default=0)
+    engagement_rate = Column(Integer, default=0)
+    
+    platform = Column(String, nullable=False)
+    posted_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    template = relationship("PostTemplate", back_populates="template_analytics")
+    post = relationship("Post")
 
 
 class Subscription(Base):
