@@ -256,7 +256,7 @@ async def oauth_callback(
             url=f"{settings.FRONTEND_URL}/dashboard/overview?error={quote(error_msg)}"
         )
     
-    # ✅ Validate that we have EITHER OAuth 1.0a OR OAuth 2.0 parameters
+    #  Validate that we have EITHER OAuth 1.0a OR OAuth 2.0 parameters
     is_oauth1 = bool(oauth_token and oauth_verifier)
     is_oauth2 = bool(code and state)  # OAuth 2.0 requires state
     
@@ -629,74 +629,76 @@ async def get_supported_platforms():
 
 # ============== DEBUG ENDPOINTS ==============
 
+# app/routers/auth.py (or wherever)
 
-@router.get("/oauth/debug/{platform}")
-async def debug_oauth_config(platform: str):
-    """
-    Debug OAuth configuration for a specific platform.
-    Shows configuration without sensitive data.
-    """
-    from app.services.oauth_service import OAUTH_CONFIGS, OAuthService
+@router.get("/debug/twitter")
+async def debug_twitter(
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(auth.get_current_active_user)
+):
+    """Debug Twitter connection"""
+    from app import crud
+    from app.config import settings
+    from requests_oauthlib import OAuth1Session
     
-    platform = platform.lower()
+    # Check app credentials
+    print(f"🔍 Twitter App Credentials:")
+    print(f"   API Key (Consumer Key): {settings.TWITTER_API_KEY[:20]}...")
+    print(f"   API Secret length: {len(settings.TWITTER_API_SECRET)}")
     
-    if platform not in OAUTH_CONFIGS:
-        return {
-            "error": f"Platform '{platform}' not supported",
-            "supported_platforms": list(OAUTH_CONFIGS.keys())
-        }
+    # Get connection
+    connection = await crud.SocialConnectionCRUD.get_connection_by_platform(
+        db, current_user.id, "TWITTER"
+    )
     
-    config = OAUTH_CONFIGS[platform]
+    if not connection:
+        return {"error": "Twitter not connected"}
     
-    # Validate configuration
-    is_valid, error_msg = OAuthService.validate_config(platform)
+    # Check token format
+    token = connection.access_token
+    print(f"\n🔍 Token Format Check:")
+    print(f"   Token format: {' token:secret' if ':' in token else ' Invalid'}")
     
-    return {
-        "platform": platform,
-        "status": " VALID" if is_valid else f" INVALID: {error_msg}",
-        "configuration": {
-            "client_id": f"{config.get('client_id', 'NOT SET')[:15]}..." if config.get('client_id') else "NOT SET",
-            "client_id_length": len(config.get('client_id', '')) if config.get('client_id') else 0,
-            "client_secret_set": "YES " if config.get('client_secret') else "NO ",
-            "client_secret_length": len(config.get('client_secret', '')) if config.get('client_secret') else 0,
-            "redirect_uri": config.get('redirect_uri', 'NOT SET'),
-            "auth_url": config.get('auth_url'),
-            "token_url": config.get('token_url'),
-            "scopes": config.get('scope', 'NONE'),
-            "uses_pkce": config.get('uses_pkce', False),
-            "token_auth_method": config.get('token_auth_method', 'body'),
-            "response_type": config.get('response_type', 'code'),
-        },
-        "warnings": _get_config_warnings(platform, config)
-    }
-
-
-def _get_config_warnings(platform: str, config: Dict) -> List[str]:
-    """Get configuration warnings for a platform"""
-    warnings = []
+    if ':' not in token:
+        return {"error": "Invalid token format in database"}
     
-    # Check client ID length
-    if config.get('client_id'):
-        client_id_len = len(config['client_id'])
-        if platform == 'twitter' and client_id_len < 20:
-            warnings.append(f"⚠️ Twitter Client IDs are usually 20-30 chars, yours is {client_id_len}. Are you using the OAuth 2.0 Client ID (not API Key)?")
-        if platform == 'facebook' and client_id_len < 10:
-            warnings.append(f"⚠️ Facebook App IDs are usually 15+ digits, yours is {client_id_len}. Check your Facebook App ID.")
+    oauth_token, oauth_token_secret = token.split(':', 1)
+    print(f"   OAuth Token: {oauth_token[:20]}...")
+    print(f"   OAuth Secret: {oauth_token_secret[:20]}...")
     
-    # Check redirect URI
-    if config.get('redirect_uri'):
-        if 'localhost' in config['redirect_uri']:
-            warnings.append("ℹ️ Using localhost redirect URI - make sure this is also in production config")
-    
-    # Platform-specific warnings
-    if platform == 'twitter' and not config.get('uses_pkce'):
-        warnings.append(" Twitter REQUIRES PKCE! Set uses_pkce to True")
-    
-    if platform == 'facebook' and 'pages_show_list' not in config.get('scope', ''):
-        warnings.append("⚠️ Facebook scope missing 'pages_show_list' - you won't be able to post to pages")
-    
-    return warnings
-
+    # Try to validate
+    try:
+        twitter = OAuth1Session(
+            client_key=settings.TWITTER_API_KEY,
+            client_secret=settings.TWITTER_API_SECRET,
+            resource_owner_key=oauth_token,
+            resource_owner_secret=oauth_token_secret
+        )
+        
+        # Test API call
+        response = twitter.get("https://api.twitter.com/2/users/me", timeout=10)
+        
+        print(f"\n🔍 API Test:")
+        print(f"   Status: {response.status_code}")
+        print(f"   Response: {response.text[:200]}")
+        
+        if response.status_code == 200:
+            user_data = response.json()
+            return {
+                "status": " Working",
+                "app_permissions": "Check Twitter Developer Portal",
+                "user": user_data.get("data", {})
+            }
+        else:
+            return {
+                "status": " Failed",
+                "error_code": response.status_code,
+                "error": response.text,
+                "likely_cause": "App permissions set to 'Read Only' or invalid tokens"
+            }
+            
+    except Exception as e:
+        return {"error": str(e)}
 
 @router.get("/oauth/test/{platform}")
 async def test_oauth_flow(

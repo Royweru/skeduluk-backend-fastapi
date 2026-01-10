@@ -403,6 +403,155 @@ async def generate_hashtags(
         )
 
 
+
+@router.post("/{post_id}/duplicate", response_model=schemas.DuplicatePostResponse)
+async def duplicate_post(
+    post_id: int,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Duplicate an existing post"""
+    
+    # Get original post
+    original_post = await PostCRUD.get_post_by_id(db, post_id, current_user.id)
+    if not original_post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    # Create duplicate
+    duplicate = models.Post(
+        user_id=current_user.id,
+        original_content=original_post.original_content + " (Copy)",
+        enhanced_content=original_post.enhanced_content,
+        platform_specific_content=original_post.platform_specific_content,
+        image_urls=original_post.image_urls,
+        video_urls=original_post.video_urls,
+        audio_file_url=original_post.audio_file_url,
+        platforms=original_post.platforms,
+        status="draft",  # Always start as draft
+        scheduled_for=None,  # User needs to reschedule
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    )
+    
+    db.add(duplicate)
+    await db.commit()
+    await db.refresh(duplicate)
+    
+    return {
+        "id": duplicate.id,
+        "message": "Post duplicated successfully"
+    }
+
+# ============================================================================
+# NEW: Bulk Delete Posts
+# ============================================================================
+
+@router.post("/bulk-delete")
+async def bulk_delete_posts(
+    request: schemas.BulkDeleteRequest,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Delete multiple posts at once"""
+    
+    if not request.post_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No post IDs provided"
+        )
+    
+    deleted_count = 0
+    failed_ids = []
+    
+    for post_id in request.post_ids:
+        try:
+            success = await PostCRUD.delete_post(db, post_id, current_user.id)
+            if success:
+                deleted_count += 1
+            else:
+                failed_ids.append(post_id)
+        except Exception as e:
+            print(f"Error deleting post {post_id}: {e}")
+            failed_ids.append(post_id)
+    
+    return {
+        "deleted": deleted_count,
+        "failed": len(failed_ids),
+        "failed_ids": failed_ids,
+        "message": f"Successfully deleted {deleted_count} post(s)"
+    }
+
+# ============================================================================
+# NEW: Bulk Reschedule Posts
+# ============================================================================
+
+@router.post("/bulk-reschedule")
+async def bulk_reschedule_posts(
+    request: schemas.BulkRescheduleRequest,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Reschedule multiple posts to the same time"""
+    
+    if not request.post_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No post IDs provided"
+        )
+    
+    # Parse scheduled date
+    try:
+        scheduled_datetime = datetime.fromisoformat(
+            request.scheduled_for.replace('Z', '+00:00')
+        )
+        scheduled_datetime = make_timezone_naive(scheduled_datetime)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid date format. Use ISO format."
+        )
+    
+    updated_count = 0
+    failed_ids = []
+    
+    for post_id in request.post_ids:
+        try:
+            post = await PostCRUD.get_post_by_id(db, post_id, current_user.id)
+            if post:
+                post.scheduled_for = scheduled_datetime
+                post.status = "scheduled"
+                post.updated_at = datetime.utcnow()
+                updated_count += 1
+            else:
+                failed_ids.append(post_id)
+        except Exception as e:
+            print(f"Error rescheduling post {post_id}: {e}")
+            failed_ids.append(post_id)
+    
+    if updated_count > 0:
+        await db.commit()
+    
+    return {
+        "updated": updated_count,
+        "failed": len(failed_ids),
+        "failed_ids": failed_ids,
+        "message": f"Successfully rescheduled {updated_count} post(s)"
+    }
+
+
+def _get_status_color(status: str) -> str:
+    """Helper to assign colors to different post statuses"""
+    colors = {
+        "scheduled": "#FCD34D",  # Golden yellow
+        "processing": "#f59e0b",  # Amber
+        "posting": "#8b5cf6",     # Purple
+        "posted": "#34D399",      # Mint green
+        "failed": "#ef4444",      # Red
+        "draft": "#6b7280"        # Gray
+    }
+    return colors.get(status, "#6b7280")
+
+# Update your existing calendar endpoint to include color in response:
 @router.get("/calendar/events", response_model=schemas.CalendarEventResponse)
 async def get_calendar_events(
     start_date: str,
@@ -443,12 +592,29 @@ async def get_calendar_events(
         for post in posts:
             event_date = post.scheduled_for or post.created_at
             
+            # Parse platforms
             platforms_list = []
             if isinstance(post.platforms, str):
                 try:
                     platforms_list = json.loads(post.platforms)
                 except:
                     platforms_list = [p.strip() for p in post.platforms.split(',') if p.strip()]
+            
+            # Parse image URLs
+            image_urls = []
+            if post.image_urls:
+                try:
+                    image_urls = json.loads(post.image_urls) if isinstance(post.image_urls, str) else post.image_urls
+                except:
+                    image_urls = []
+            
+            # Parse video URLs
+            video_urls = []
+            if post.video_urls:
+                try:
+                    video_urls = json.loads(post.video_urls) if isinstance(post.video_urls, str) else post.video_urls
+                except:
+                    video_urls = []
             
             content_preview = post.original_content[:100] + "..." if len(post.original_content) > 100 else post.original_content
             
@@ -460,12 +626,13 @@ async def get_calendar_events(
                 "end": event_date.isoformat(),
                 "platforms": platforms_list,
                 "status": post.status,
-                "image_urls": json.loads(post.image_urls) if post.image_urls else [],
+                "image_urls": image_urls,
+                "video_urls": video_urls,
                 "is_scheduled": post.scheduled_for is not None,
                 "scheduled_for": post.scheduled_for.isoformat() if post.scheduled_for else None,
                 "created_at": post.created_at.isoformat(),
                 "error_message": post.error_message,
-                "color": _get_status_color(post.status),
+                "color": _get_status_color(post.status),  # ✅ ADD THIS
                 "allDay": False,
             })
         
@@ -489,20 +656,6 @@ async def get_calendar_events(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch calendar events: {str(e)}"
         )
-
-
-def _get_status_color(status: str) -> str:
-    """Helper to assign colors to different post statuses"""
-    colors = {
-        "scheduled": "#3b82f6",
-        "processing": "#f59e0b",
-        "posting": "#8b5cf6",
-        "posted": "#10b981",
-        "failed": "#ef4444",
-        "draft": "#6b7280"
-    }
-    return colors.get(status, "#6b7280")
-
 
 @router.get("/ai-providers/info")
 async def get_ai_providers(

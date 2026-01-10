@@ -269,3 +269,14 @@ class CalendarEventResponse(BaseModel):
     start_date: str
     end_date: str
     total: int
+
+class BulkDeleteRequest(BaseModel):
+    post_ids: List[int]
+
+class BulkRescheduleRequest(BaseModel):
+    post_ids: List[int]
+    scheduled_for: str  # ISO datetime string
+
+class DuplicatePostResponse(BaseModel):
+    id: int
+    message: str
