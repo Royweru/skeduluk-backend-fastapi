@@ -4,7 +4,7 @@ import uvicorn
 from fastapi import FastAPI
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import auth, posts, social, users, payments,templates
+from .routers import auth, posts, social, users, payments, templates
 from .config import settings
 
 app = FastAPI(title=settings.APP_NAME)

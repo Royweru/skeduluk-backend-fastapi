@@ -1,9 +1,11 @@
 # app/models.py
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey,JSON ,Enum
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, JSON, Enum,Float
+import sqlalchemy as sa
 import enum
 from sqlalchemy.dialects.postgresql import JSONB
-from datetime import datetime, timedelta
+from datetime import datetime
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import text
 from .database import Base
 
 class User(Base):
@@ -28,26 +30,28 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     plan = Column(String, default="trial")
     trial_ends_at = Column(DateTime, nullable=True)
-    posts_used = Column(Integer, default=0)
-    posts_limit = Column(Integer, default=10)
+    posts_used = Column(Integer, server_default=text('0'))
+    posts_limit = Column(Integer, server_default=text('10'))
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    updated_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'), onupdate=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
     
-    # Relationships - FIXED: Added missing relationships
-    social_connections = relationship("SocialConnection", back_populates="user")
-    posts = relationship("Post", back_populates="user")
-    post_templates = relationship("PostTemplate", back_populates="user")  
-    subscriptions = relationship("Subscription", back_populates="user")  
-    template_folders = relationship("TemplateFolder", back_populates="user")
+    # Relationships
+    social_connections = relationship("SocialConnection", back_populates="user", cascade="all, delete-orphan")
+    posts = relationship("Post", back_populates="user", cascade="all, delete-orphan")
+    post_templates = relationship("PostTemplate", back_populates="user", cascade="all, delete-orphan")  
+    subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")  
+    template_folders = relationship("TemplateFolder", back_populates="user", cascade="all, delete-orphan")
+    analytics_summaries = relationship("UserAnalyticsSummary", back_populates="user", cascade="all, delete-orphan")
+
 class SocialConnection(Base):
     __tablename__ = "social_connections"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    platform = Column(String, nullable=False)  # TWITTER, FACEBOOK, LINKEDIN
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    platform = Column(String, nullable=False, index=True)  # TWITTER, FACEBOOK, LINKEDIN
     platform_user_id = Column(String, nullable=False)
     username = Column(String, nullable=False)
     protocol = Column(String, nullable=True)  # oauth1 or oauth2
@@ -59,9 +63,9 @@ class SocialConnection(Base):
     platform_avatar_url = Column(String, nullable=True)
     platform_username = Column(String, nullable=True)
     last_synced = Column(DateTime, nullable=True)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active = Column(Boolean, server_default=text('TRUE'))
+    created_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    updated_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'), onupdate=datetime.utcnow)
     
     # Facebook specific fields
     facebook_page_id = Column(String, nullable=True)  # Selected page ID
@@ -77,7 +81,7 @@ class Post(Base):
     __tablename__ = "posts"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     original_content = Column(Text, nullable=False)
     enhanced_content = Column(JSONB, nullable=True)
     image_urls = Column(Text, nullable=True)
@@ -85,50 +89,45 @@ class Post(Base):
     platform_specific_content = Column(JSONB, nullable=True)
     audio_file_url = Column(String, nullable=True)
     platforms = Column(Text, nullable=False)
-    status = Column(String, default="processing")
-    scheduled_for = Column(DateTime, nullable=True)
+    status = Column(String, server_default=text("'processing'"))
+    scheduled_for = Column(DateTime, nullable=True, index=True)
     error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    updated_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'), onupdate=datetime.utcnow)
     
-    # Relationships - FIXED: Added missing post_results relationship
+    # Relationships
     user = relationship("User", back_populates="posts")
     post_results = relationship("PostResult", back_populates="post", cascade="all, delete-orphan")  
-    
+    analytics = relationship("PostAnalytics", back_populates="post", cascade="all, delete-orphan")
+    template_analytics = relationship("TemplateAnalytics", back_populates="post", cascade="all, delete-orphan")
+
 class PostResult(Base):
     __tablename__ = "post_results"
     
     id = Column(Integer, primary_key=True, index=True)
-    post_id = Column(Integer, ForeignKey("posts.id"), nullable=False)
+    post_id = Column(Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
     platform = Column(String, nullable=False)
     
     # Post status
-    status = Column(String, default="pending")
+    status = Column(String, server_default=text("'pending'"))
     platform_post_id = Column(String, nullable=True)
     platform_post_url = Column(String, nullable=True)
     content_used = Column(Text, nullable=True)
     
-    # Engagement metrics
-    likes_count = Column(Integer, default=0)
-    comments_count = Column(Integer, default=0)
-    shares_count = Column(Integer, default=0)
-    views_count = Column(Integer, default=0)
-    
     # Error handling
     error_message = Column(Text, nullable=True)
-    retry_count = Column(Integer, default=0)
+    retry_count = Column(Integer, server_default=text('0'))
     
     # Timestamps
     posted_at = Column(DateTime, nullable=True)
     last_synced_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    updated_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'), onupdate=datetime.utcnow)
     
     # Relationships
     post = relationship("Post", back_populates="post_results")
 
-
-class TemplateCategory(str, enum.Enum):
+class TemplateCategory(enum.Enum):
     PRODUCT_LAUNCH = "product_launch"
     EVENT_PROMOTION = "event_promotion"
     BLOG_POST = "blog_post"
@@ -142,7 +141,7 @@ class TemplateCategory(str, enum.Enum):
     TESTIMONIAL = "testimonial"
     INSPIRATIONAL = "inspirational"
 
-class TemplateTone(str, enum.Enum):
+class TemplateTone(enum.Enum):
     PROFESSIONAL = "professional"
     CASUAL = "casual"
     HUMOROUS = "humorous"
@@ -155,12 +154,12 @@ class PostTemplate(Base):
     __tablename__ = "post_templates"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # NULL = system template
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)  # NULL = system template
     
     # Template Info
     name = Column(String, nullable=False, index=True)
     description = Column(Text, nullable=True)
-    category = Column(String, nullable=False, index=True)
+    category = Column(Enum(TemplateCategory), nullable=False, index=True)
     
     # Content Structure
     content_template = Column(Text, nullable=False)  # Template with {variables}
@@ -171,32 +170,32 @@ class PostTemplate(Base):
     supported_platforms = Column(JSON, nullable=False)  # ["TWITTER", "LINKEDIN"]
     
     # Metadata
-    tone = Column(String, default="engaging")
+    tone = Column(Enum(TemplateTone), server_default=text("'engaging'"))
     suggested_hashtags = Column(JSON, nullable=True)  # Array of hashtags
     suggested_media_type = Column(String, nullable=True)  # "image", "video", "none"
     
     # Template Settings
-    is_public = Column(Boolean, default=False)  # Community templates
-    is_premium = Column(Boolean, default=False)
-    is_system = Column(Boolean, default=False)  # Official Skeduluk templates
+    is_public = Column(Boolean, server_default=text('FALSE'))  # Community templates
+    is_premium = Column(Boolean, server_default=text('FALSE'))
+    is_system = Column(Boolean, server_default=text('FALSE'))  # Official Skeduluk templates
     
     # Analytics
-    usage_count = Column(Integer, default=0)
-    success_rate = Column(Integer, default=0)  # Avg engagement %
+    usage_count = Column(Integer, server_default=text('0'))
+    success_rate = Column(Integer, server_default=text('0'))  # Avg engagement %
     avg_engagement = Column(JSON, nullable=True)  # {likes: 0, shares: 0, comments: 0}
     
     # UI/UX
     thumbnail_url = Column(String, nullable=True)
-    color_scheme = Column(String, default="#3B82F6")  # Hex color
-    icon = Column(String, default="sparkles")  # Icon name
+    color_scheme = Column(String, server_default=text("'#3B82F6'"))  # Hex color
+    icon = Column(String, server_default=text("'sparkles'"))  # Icon name
     
     # Favorites & Organization
-    is_favorite = Column(Boolean, default=False)
-    folder_id = Column(Integer, ForeignKey("template_folders.id"), nullable=True)
+    is_favorite = Column(Boolean, server_default=text('FALSE'))
+    folder_id = Column(Integer, ForeignKey("template_folders.id", ondelete="SET NULL"), nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    updated_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'), onupdate=datetime.utcnow)
     last_used_at = Column(DateTime, nullable=True)
     
     # Relationships
@@ -204,69 +203,105 @@ class PostTemplate(Base):
     folder = relationship("TemplateFolder", back_populates="templates")
     template_analytics = relationship("TemplateAnalytics", back_populates="template", cascade="all, delete-orphan")
 
-
 class TemplateFolder(Base):
     __tablename__ = "template_folders"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
-    color = Column(String, default="#6366F1")
-    icon = Column(String, default="folder")
+    color = Column(String, server_default=text("'#6366F1'"))
+    icon = Column(String, server_default=text("'folder'"))
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    updated_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'), onupdate=datetime.utcnow)
     
     # Relationships
     user = relationship("User", back_populates="template_folders")
-    templates = relationship("PostTemplate", back_populates="folder")
-
+    templates = relationship("PostTemplate", back_populates="folder", cascade="all, delete-orphan")
 
 class TemplateAnalytics(Base):
     __tablename__ = "template_analytics"
     
     id = Column(Integer, primary_key=True, index=True)
-    template_id = Column(Integer, ForeignKey("post_templates.id"), nullable=False)
-    post_id = Column(Integer, ForeignKey("posts.id"), nullable=True)
+    template_id = Column(Integer, ForeignKey("post_templates.id", ondelete="CASCADE"), nullable=False, index=True)
+    post_id = Column(Integer, ForeignKey("posts.id", ondelete="SET NULL"), nullable=True)
     
     # Performance Metrics
-    views = Column(Integer, default=0)
-    likes = Column(Integer, default=0)
-    comments = Column(Integer, default=0)
-    shares = Column(Integer, default=0)
-    engagement_rate = Column(Integer, default=0)
+    views = Column(Integer, server_default=text('0'))
+    likes = Column(Integer, server_default=text('0'))
+    comments = Column(Integer, server_default=text('0'))
+    shares = Column(Integer, server_default=text('0'))
+    engagement_rate = Column(Integer, server_default=text('0'))
     
     platform = Column(String, nullable=False)
-    posted_at = Column(DateTime, default=datetime.utcnow)
+    posted_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
     
     # Relationships
     template = relationship("PostTemplate", back_populates="template_analytics")
-    post = relationship("Post")
+    post = relationship("Post", back_populates="template_analytics")
 
+class PostAnalytics(Base):
+    __tablename__ = "post_analytics"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    platform = Column(Enum("TWITTER", "FACEBOOK", "LINKEDIN", "INSTAGRAM", "TIKTOK", "YOUTUBE", name="platform_enum", create_type=True), nullable=False, index=True)
+    metrics = Column(JSONB, nullable=True)
+    fetched_at = Column(DateTime, nullable=True, index=True)
+    error = Column(Text, nullable=True)
+    
+    # Constraints
+    __table_args__ = (
+        sa.UniqueConstraint('post_id', 'platform', name='uq_post_platform'),
+    )
+    
+    post = relationship("Post", back_populates="analytics")
+
+class UserAnalyticsSummary(Base):
+    __tablename__ = "user_analytics_summaries"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    period = Column(Enum("daily", "weekly", "monthly", name="period_enum", create_type=True), nullable=False, index=True)
+    start_date = Column(DateTime, nullable=False, index=True)
+    end_date = Column(DateTime, nullable=False)
+    total_posts = Column(Integer, server_default=text('0'))
+    total_engagements = Column(Integer, server_default=text('0'))
+    total_impressions = Column(Integer, server_default=text('0'))
+    avg_engagement_rate = Column(Float, server_default=text('0.0'))
+    platform_breakdown = Column(JSONB, nullable=True)
+    updated_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'), onupdate=datetime.utcnow)
+    
+    # Constraints
+    __table_args__ = (
+        sa.UniqueConstraint('user_id', 'period', 'start_date', name='uq_user_period_start'),
+    )
+    
+    user = relationship("User", back_populates="analytics_summaries")
 
 class Subscription(Base):
     __tablename__ = "subscriptions"
     
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Subscription info
     plan = Column(String, nullable=False)
-    status = Column(String, default="active")
+    status = Column(String, server_default=text("'active'"))
     amount = Column(Integer, nullable=False)
-    currency = Column(String, default="USD")
+    currency = Column(String, server_default=text("'USD'"))
     payment_method = Column(String, nullable=False)
     payment_reference = Column(String, nullable=True)
     
     # Subscription period
-    starts_at = Column(DateTime, default=datetime.utcnow)
+    starts_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
     ends_at = Column(DateTime, nullable=False)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    updated_at = Column(DateTime, server_default=text('CURRENT_TIMESTAMP'), onupdate=datetime.utcnow)
     
     # Relationships
     user = relationship("User", back_populates="subscriptions")
