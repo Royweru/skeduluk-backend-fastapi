@@ -36,7 +36,7 @@ SYSTEM_TEMPLATES = [
         "name": "🚀 Product Launch Announcement",
         "description": "Announce your new product with excitement",
         "category": "product_launch",
-        "content_template": "🎉 Excited to announce {product_name}! {product_description}\n\n✨ Key features:\n{features}\n\n{cta}\n\n{hashtags}",
+        "content_template": " Excited to announce {product_name}! {product_description}\n\n✨ Key features:\n{features}\n\n{cta}\n\n{hashtags}",
         "variables": [
             {
                 "name": "product_name",
@@ -536,10 +536,10 @@ SYSTEM_TEMPLATES = [
     
     # COMPANY MILESTONE
     {
-        "name": "🎉 Company Milestone",
+        "name": " Company Milestone",
         "description": "Celebrate achievements and milestones",
         "category": "announcement",
-        "content_template": "🎉 {milestone_title}!\n\n{milestone_details}\n\n{gratitude}\n\n{whats_next}\n\n{hashtags}",
+        "content_template": " {milestone_title}!\n\n{milestone_details}\n\n{gratitude}\n\n{whats_next}\n\n{hashtags}",
         "variables": [
             {
                 "name": "milestone_title",
@@ -730,7 +730,7 @@ async def populate_templates():
                     await db.commit()
                     print("🗑️  Deleted existing system templates")
                 else:
-                    print("❌ Aborting...")
+                    print(" Aborting...")
                     return
             
             # Create templates
@@ -766,12 +766,12 @@ async def populate_templates():
                 await TemplateCRUD.create_template(db, template_create, user_id=None)
                 created_count += 1
                 
-                print(f"✅ Created: {template_data['name']}")
+                print(f" Created: {template_data['name']}")
             
-            print(f"\n🎉 Successfully created {created_count} system templates!")
+            print(f"\n Successfully created {created_count} system templates!")
             
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f" Error: {e}")
         import traceback
         traceback.print_exc()
     
