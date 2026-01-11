@@ -7,13 +7,14 @@ Usage: python -m scripts.populate_templates
 import asyncio
 import sys
 from pathlib import Path
-
+from dotenv import load_dotenv
+import os
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.database import create_async_engine, get_async_session_local
+from app.database import create_async_engine, get_async_session_local, get_async_database_url
 from app import models
-from app.crud.template_crud import TemplateCRUD
+from app.crud import TemplateCRUD
 from app.schemas import TemplateCreate, TemplateVariableDefinition
 
 
@@ -21,6 +22,14 @@ from app.schemas import TemplateCreate, TemplateVariableDefinition
 # TEMPLATE DEFINITIONS
 # ============================================================================
 
+
+load_dotenv()
+try:
+    DATABASE_URL = get_async_database_url()
+    print(f"Loaded the async db url successfully  :{DATABASE_URL}")
+except Exception as e:
+    print(f"Failed to get async database url : {e}")
+    sys.exit(1)
 SYSTEM_TEMPLATES = [
     # PRODUCT LAUNCH TEMPLATES
     {
@@ -692,7 +701,7 @@ async def populate_templates():
     print("🚀 Starting template population...")
     
     # Create engine and session
-    engine = create_async_engine()
+    engine = create_async_engine(DATABASE_URL)
     AsyncSessionLocal = get_async_session_local(engine)
     
     try:
