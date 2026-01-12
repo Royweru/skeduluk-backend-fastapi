@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import auth, schemas, models
 from ..database import get_async_db
 from ..services.payment_service import PaymentService
-from ..crud import SubscriptionCRUD
+from app.crud.subscription_crud import SubscriptionCRUD
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 

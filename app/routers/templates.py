@@ -6,18 +6,11 @@ import json
 
 from app import models, schemas, auth
 from app.database import get_async_db
-from app.crud import TemplateCRUD, TemplateFolderCRUD
+from app.crud.templates_crud import TemplateFolderCRUD,TemplateCRUD
 from app.services.ai_service import ai_service
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
-
-# ============================================================================
-# CRITICAL FIX: Put specific routes BEFORE parameterized routes
-# Order matters in FastAPI routing!
-# ============================================================================
-
-# ✅ STEP 1: All /templates/SPECIFIC routes come FIRST
 @router.get("/search", response_model=schemas.TemplateSearchResponse)
 async def search_templates(
     query: Optional[str] = Query(None),

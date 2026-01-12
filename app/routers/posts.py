@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 from app import models, schemas, auth
 from app.database import get_async_db
-from app.crud import PostCRUD
+from app.crud.post_crud import PostCRUD
 from app.services.ai_service import ai_service
 from app.services.post_service import PostService
 from app.utils.datetime_utils import make_timezone_naive
