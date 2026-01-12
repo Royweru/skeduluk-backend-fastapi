@@ -1,6 +1,6 @@
 # app/schemas.py
 import json
-from pydantic import BaseModel, EmailStr, field_validator,Field
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator,Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -163,111 +163,7 @@ class SubscriptionResponse(SubscriptionBase):
         from_attributes = True
 
 
-# ============================================================================
-# TEMPLATE SCHEMAS
-# ============================================================================
 
-class TemplateVariableDefinition(BaseModel):
-    name: str = Field(..., description="Variable name without braces, e.g., 'product_name'")
-    label: str = Field(..., description="Human-readable label")
-    type: str = Field(default="text", description="text, date, number, hashtags, url")
-    placeholder: str = Field(..., description="Placeholder text")
-    required: bool = Field(default=True)
-    default_value: Optional[str] = None
-
-class TemplateBase(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
-    description: Optional[str] = None
-    category: str
-    content_template: str = Field(..., min_length=1)
-    variables: Optional[List[TemplateVariableDefinition]] = None
-    platform_variations: Optional[Dict[str, str]] = None
-    supported_platforms: List[str] = Field(..., min_items=1)
-    tone: str = Field(default="engaging")
-    suggested_hashtags: Optional[List[str]] = None
-    suggested_media_type: Optional[str] = None
-    is_public: bool = Field(default=False)
-    thumbnail_url: Optional[str] = None
-    color_scheme: str = Field(default="#3B82F6")
-    icon: str = Field(default="sparkles")
-
-class TemplateCreate(TemplateBase):
-    pass
-
-class TemplateUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    content_template: Optional[str] = None
-    variables: Optional[List[TemplateVariableDefinition]] = None
-    platform_variations: Optional[Dict[str, str]] = None
-    is_favorite: Optional[bool] = None
-    folder_id: Optional[int] = None
-
-class TemplateResponse(TemplateBase):
-    id: int
-    user_id: Optional[int] = None
-    is_system: bool
-    is_favorite: bool
-    usage_count: int
-    success_rate: int
-    avg_engagement: Optional[Dict[str, int]] = None
-    folder_id: Optional[int] = None
-    created_at: datetime
-    updated_at: datetime
-    last_used_at: Optional[datetime] = None
-    
-    class Config:
-        from_attributes = True
-
-class TemplateUseRequest(BaseModel):
-    template_id: int
-    variable_values: Optional[Dict[str, str]] = Field(default={}, description="Key-value pairs for variables")
-    platforms: List[str] = Field(..., min_items=1)
-    scheduled_for: Optional[datetime] = None
-    use_ai_enhancement: bool = Field(default=False)
-    images: Optional[List[str]] = None
-    videos: Optional[List[str]] = None
-
-class TemplateFolderCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=100)
-    description: Optional[str] = None
-    color: str = Field(default="#6366F1")
-    icon: str = Field(default="folder")
-
-class TemplateFolderResponse(BaseModel):
-    id: int
-    user_id: int
-    name: str
-    description: Optional[str] = None
-    color: str
-    icon: str
-    template_count: Optional[int] = 0
-    created_at: datetime
-    
-    class Config:
-        from_attributes = True
-
-class TemplateSearchRequest(BaseModel):
-    query: Optional[str] = None
-    category: Optional[str] = None
-    platforms: Optional[List[str]] = None
-    tone: Optional[str] = None
-    is_favorite: Optional[bool] = None
-    folder_id: Optional[int] = None
-    include_system: bool = Field(default=True)
-    include_community: bool = Field(default=False)
-    sort_by: str = Field(default="created_at", description="created_at, usage_count, success_rate, name")
-    sort_order: str = Field(default="desc", description="asc or desc")
-    limit: int = Field(default=50, ge=1, le=100)
-    offset: int = Field(default=0, ge=0)
-
-class TemplateAnalyticsResponse(BaseModel):
-    total_uses: int
-    success_rate: int
-    avg_engagement_rate: int
-    platform_breakdown: Dict[str, int]
-    recent_posts: List[Dict[str, Any]]
-    engagement_trend: List[Dict[str, Any]]
 # AI Enhancement schemas
 class ContentEnhancementRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000, description="Original content to enhance")
@@ -367,3 +263,114 @@ class BulkRescheduleRequest(BaseModel):
 class DuplicatePostResponse(BaseModel):
     id: int
     message: str
+    
+    
+# ============================================================================
+# TEMPLATE SCHEMAS
+# ============================================================================
+class TemplateVariableDefinition(BaseModel):
+    name: str = Field(..., description="Variable name without braces, e.g., 'product_name'")
+    label: str = Field(..., description="Human-readable label")
+    type: str = Field(default="text", description="text, date, number, hashtags, url")
+    placeholder: str = Field(..., description="Placeholder text")
+    required: bool = Field(default=True)
+    default_value: Optional[str] = None
+
+class TemplateBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = None
+    category: str
+    content_template: str = Field(..., min_length=1)
+    variables: Optional[List[TemplateVariableDefinition]] = None
+    platform_variations: Optional[Dict[str, str]] = None
+    supported_platforms: List[str] = Field(..., min_items=1)
+    tone: str = Field(default="engaging")
+    suggested_hashtags: Optional[List[str]] = None
+    suggested_media_type: Optional[str] = None
+    is_public: bool = Field(default=False)
+    thumbnail_url: Optional[str] = None
+    color_scheme: str = Field(default="#3B82F6")
+    icon: str = Field(default="sparkles")
+
+class TemplateCreate(TemplateBase):
+    pass
+
+class TemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    content_template: Optional[str] = None
+    variables: Optional[List[TemplateVariableDefinition]] = None
+    platform_variations: Optional[Dict[str, str]] = None
+    is_favorite: Optional[bool] = None
+    folder_id: Optional[int] = None
+
+class TemplateResponse(TemplateBase):
+    id: int
+    user_id: Optional[int] = None
+    is_system: bool
+    # ✅ FIX: Make these fields optional with defaults to handle NULL values from DB
+    is_favorite: bool = False
+    usage_count: int = 0
+    success_rate: int = 0
+    avg_engagement: Optional[Dict[str, int]] = None
+    folder_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class TemplateUseRequest(BaseModel):
+    template_id: int
+    variable_values: Optional[Dict[str, str]] = Field(default_factory=dict, description="Key-value pairs for variables")
+    platforms: List[str] = Field(..., min_items=1)
+    scheduled_for: Optional[datetime] = None
+    use_ai_enhancement: bool = Field(default=False)
+    images: Optional[List[str]] = None
+    videos: Optional[List[str]] = None
+
+class TemplateFolderCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    color: str = Field(default="#6366F1")
+    icon: str = Field(default="folder")
+
+class TemplateFolderResponse(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    description: Optional[str] = None
+    color: str
+    icon: str
+    template_count: Optional[int] = 0
+    created_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class TemplateSearchRequest(BaseModel):
+    query: Optional[str] = None
+    category: Optional[str] = None
+    platforms: Optional[List[str]] = None
+    tone: Optional[str] = None
+    is_favorite: Optional[bool] = None
+    folder_id: Optional[int] = None
+    include_system: bool = Field(default=True)
+    include_community: bool = Field(default=False)
+    sort_by: str = Field(default="created_at", description="created_at, usage_count, success_rate, name")
+    sort_order: str = Field(default="desc", description="asc or desc")
+    limit: int = Field(default=50, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
+
+class TemplateSearchResponse(BaseModel):
+    templates: List[TemplateResponse]
+    total: int
+    limit: int
+    offset: int
+
+class TemplateAnalyticsResponse(BaseModel):
+    total_uses: int
+    success_rate: int
+    avg_engagement_rate: int
+    platform_breakdown: Dict[str, int]
+    recent_posts: List[Dict[str, Any]]
+    engagement_trend: List[Dict[str, Any]]

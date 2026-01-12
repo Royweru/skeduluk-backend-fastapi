@@ -1,6 +1,6 @@
 # app/crud.py
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import asc, desc, select, and_, or_, func
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import json

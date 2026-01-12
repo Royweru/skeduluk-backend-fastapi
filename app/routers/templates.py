@@ -13,30 +13,17 @@ router = APIRouter(prefix="/templates", tags=["templates"])
 
 
 # ============================================================================
-# TEMPLATE CRUD ENDPOINTS
+# CRITICAL FIX: Put specific routes BEFORE parameterized routes
+# Order matters in FastAPI routing!
 # ============================================================================
 
-@router.post("/", response_model=schemas.TemplateResponse, status_code=status.HTTP_201_CREATED)
-async def create_template(
-    template: schemas.TemplateCreate,
-    current_user: models.User = Depends(auth.get_current_active_user),
-    db: AsyncSession = Depends(get_async_db)
-):
-    """Create a new template"""
-    
-    try:
-        db_template = await TemplateCRUD.create_template(db, template, current_user.id)
-        return db_template
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/search", response_model=dict)
+# ✅ STEP 1: All /templates/SPECIFIC routes come FIRST
+@router.get("/search", response_model=schemas.TemplateSearchResponse)
 async def search_templates(
     query: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     tone: Optional[str] = Query(None),
-    platforms: Optional[str] = Query(None),  # Comma-separated
+    platforms: Optional[str] = Query(None),
     is_favorite: Optional[bool] = Query(None),
     folder_id: Optional[int] = Query(None),
     include_system: bool = Query(True),
@@ -48,22 +35,8 @@ async def search_templates(
     current_user: models.User = Depends(auth.get_current_active_user),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """
-    Search templates with advanced filters
+    """Search templates with advanced filters"""
     
-    - **query**: Search in name and description
-    - **category**: Filter by category
-    - **tone**: Filter by tone
-    - **platforms**: Comma-separated platform IDs (twitter,linkedin,facebook)
-    - **is_favorite**: Show only favorites
-    - **folder_id**: Filter by folder
-    - **include_system**: Include system templates
-    - **include_community**: Include public community templates
-    - **sort_by**: created_at, usage_count, success_rate, name
-    - **sort_order**: asc or desc
-    """
-    
-    # Parse platforms
     platforms_list = platforms.split(',') if platforms else None
     
     search_request = schemas.TemplateSearchRequest(
@@ -83,14 +56,86 @@ async def search_templates(
     
     templates, total = await TemplateCRUD.search_templates(db, current_user.id, search_request)
     
-    return {
-        "templates": templates,
-        "total": total,
-        "limit": limit,
-        "offset": offset
-    }
+    # ✅ FIX: Convert SQLAlchemy models to Pydantic schemas
+    template_responses = [
+        schemas.TemplateResponse.model_validate(t) for t in templates
+    ]
+    
+    return schemas.TemplateSearchResponse(
+        templates=template_responses,
+        total=total,
+        limit=limit,
+        offset=offset
+    )
 
 
+@router.get("/categories/list")
+async def get_categories(
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Get all categories with template counts"""
+    categories = await TemplateCRUD.get_categories_with_counts(db, current_user.id)
+    return {"categories": categories}
+
+
+# ============================================================================
+# FOLDER ROUTES - Must come before /{template_id}
+# ============================================================================
+
+@router.post("/folders", response_model=schemas.TemplateFolderResponse, status_code=status.HTTP_201_CREATED)
+async def create_folder(
+    folder: schemas.TemplateFolderCreate,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Create a new template folder"""
+    db_folder = await TemplateFolderCRUD.create_folder(db, folder, current_user.id)
+    return schemas.TemplateFolderResponse.model_validate(db_folder)
+
+
+@router.get("/folders", response_model=List[schemas.TemplateFolderResponse])
+async def get_folders(
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Get all folders for current user"""
+    folders = await TemplateFolderCRUD.get_folders(db, current_user.id)
+    return [schemas.TemplateFolderResponse.model_validate(f) for f in folders]
+
+
+@router.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_folder(
+    folder_id: int,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Delete a folder"""
+    success = await TemplateFolderCRUD.delete_folder(db, folder_id, current_user.id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return None
+
+
+# ============================================================================
+# TEMPLATE CRUD ENDPOINTS - Parameterized routes come AFTER specific routes
+# ============================================================================
+
+@router.post("/", response_model=schemas.TemplateResponse, status_code=status.HTTP_201_CREATED)
+async def create_template(
+    template: schemas.TemplateCreate,
+    current_user: models.User = Depends(auth.get_current_active_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Create a new template"""
+    try:
+        db_template = await TemplateCRUD.create_template(db, template, current_user.id)
+        return schemas.TemplateResponse.model_validate(db_template)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ✅ STEP 2: Parameterized routes like /{template_id} come LAST
 @router.get("/{template_id}", response_model=schemas.TemplateResponse)
 async def get_template(
     template_id: int,
@@ -98,13 +143,10 @@ async def get_template(
     db: AsyncSession = Depends(get_async_db)
 ):
     """Get a specific template by ID"""
-    
     template = await TemplateCRUD.get_template_by_id(db, template_id, current_user.id)
-    
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
-    
-    return template
+    return schemas.TemplateResponse.model_validate(template)
 
 
 @router.put("/{template_id}", response_model=schemas.TemplateResponse)
@@ -115,13 +157,10 @@ async def update_template(
     db: AsyncSession = Depends(get_async_db)
 ):
     """Update a template (only your own templates)"""
-    
     template = await TemplateCRUD.update_template(db, template_id, current_user.id, template_update)
-    
     if not template:
         raise HTTPException(status_code=404, detail="Template not found or you don't have permission")
-    
-    return template
+    return schemas.TemplateResponse.model_validate(template)
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -131,12 +170,9 @@ async def delete_template(
     db: AsyncSession = Depends(get_async_db)
 ):
     """Delete a template"""
-    
     success = await TemplateCRUD.delete_template(db, template_id, current_user.id)
-    
     if not success:
         raise HTTPException(status_code=404, detail="Template not found or you don't have permission")
-    
     return None
 
 
@@ -147,13 +183,10 @@ async def toggle_favorite(
     db: AsyncSession = Depends(get_async_db)
 ):
     """Toggle favorite status of a template"""
-    
     template = await TemplateCRUD.toggle_favorite(db, template_id, current_user.id)
-    
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
-    
-    return template
+    return schemas.TemplateResponse.model_validate(template)
 
 
 # ============================================================================
@@ -167,29 +200,19 @@ async def use_template(
     current_user: models.User = Depends(auth.get_current_active_user),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """
-    Use a template to create a post
-    
-    This endpoint:
-    1. Fetches the template
-    2. Replaces variables with provided values
-    3. Optionally enhances content with AI
-    4. Creates a new post
-    """
+    """Use a template to create a post"""
     
     # Get template
     template = await TemplateCRUD.get_template_by_id(db, template_id, current_user.id)
-    
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     
     # Replace variables in content
     content = template.content_template
-    
     for var_name, var_value in use_request.variable_values.items():
         content = content.replace(f"{{{var_name}}}", var_value)
     
-    # Check if there are still unreplaced variables
+    # Check for unreplaced variables
     import re
     remaining_vars = re.findall(r'\{(\w+)\}', content)
     if remaining_vars:
@@ -203,7 +226,6 @@ async def use_template(
     if template.platform_variations:
         for platform, variation in template.platform_variations.items():
             if platform in use_request.platforms:
-                # Replace variables in variation
                 for var_name, var_value in use_request.variable_values.items():
                     variation = variation.replace(f"{{{var_name}}}", var_value)
                 platform_specific_content[platform.lower()] = variation
@@ -232,7 +254,6 @@ async def use_template(
             }
         except Exception as e:
             print(f"AI enhancement error: {e}")
-            # Continue without AI enhancement
     
     # Create post
     from app.services.post_service import PostService
@@ -278,74 +299,14 @@ async def use_template(
 # ANALYTICS ENDPOINTS
 # ============================================================================
 
-@router.get("/{template_id}/analytics")
+@router.get("/{template_id}/analytics", response_model=schemas.TemplateAnalyticsResponse)
 async def get_template_analytics(
     template_id: int,
     current_user: models.User = Depends(auth.get_current_active_user),
     db: AsyncSession = Depends(get_async_db)
 ):
     """Get analytics for a template"""
-    
     analytics = await TemplateCRUD.get_template_analytics(db, template_id, current_user.id)
-    
     if analytics is None:
         raise HTTPException(status_code=404, detail="Template not found")
-    
     return analytics
-
-
-@router.get("/categories/list")
-async def get_categories(
-    current_user: models.User = Depends(auth.get_current_active_user),
-    db: AsyncSession = Depends(get_async_db)
-):
-    """Get all categories with template counts"""
-    
-    categories = await TemplateCRUD.get_categories_with_counts(db, current_user.id)
-    
-    return {"categories": categories}
-
-
-# ============================================================================
-# FOLDER ENDPOINTS
-# ============================================================================
-
-@router.post("/folders", response_model=schemas.TemplateFolderResponse, status_code=status.HTTP_201_CREATED)
-async def create_folder(
-    folder: schemas.TemplateFolderCreate,
-    current_user: models.User = Depends(auth.get_current_active_user),
-    db: AsyncSession = Depends(get_async_db)
-):
-    """Create a new template folder"""
-    
-    db_folder = await TemplateFolderCRUD.create_folder(db, folder, current_user.id)
-    
-    return db_folder
-
-
-@router.get("/folders", response_model=List[schemas.TemplateFolderResponse])
-async def get_folders(
-    current_user: models.User = Depends(auth.get_current_active_user),
-    db: AsyncSession = Depends(get_async_db)
-):
-    """Get all folders for current user"""
-    
-    folders = await TemplateFolderCRUD.get_folders(db, current_user.id)
-    
-    return folders
-
-
-@router.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_folder(
-    folder_id: int,
-    current_user: models.User = Depends(auth.get_current_active_user),
-    db: AsyncSession = Depends(get_async_db)
-):
-    """Delete a folder"""
-    
-    success = await TemplateFolderCRUD.delete_folder(db, folder_id, current_user.id)
-    
-    if not success:
-        raise HTTPException(status_code=404, detail="Folder not found")
-    
-    return None
