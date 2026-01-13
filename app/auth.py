@@ -7,7 +7,7 @@ from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from .crud.user_crud import UserCRUD
 from .database import get_async_db
 from . import models
 from .config import settings
@@ -61,7 +61,7 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
     
-    from .crud import UserCRUD
+    
     user = await UserCRUD.get_user_by_username(db, username)
     if user is None:
         raise credentials_exception

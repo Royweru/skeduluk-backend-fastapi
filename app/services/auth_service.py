@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from .. import models
-from ..auth import get_password_hash, verify_password
+from app.auth import get_password_hash, verify_password
 from .email_service import email_service as EmailService
 
 

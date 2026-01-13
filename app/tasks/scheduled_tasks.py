@@ -14,6 +14,9 @@ from app import models, crud
 from app.services.social_service import SocialService
 from app.database import create_task_engine, get_async_session_local
 
+from app.crud.post_crud import PostCRUD
+from app.crud.social_connection_crud import SocialConnectionCRUD
+from app.crud.analytics_crud import PostAnalyticsCRUD
 
 async def publish_post_async(post_id: int) -> Dict[str, Any]:
     """
@@ -127,7 +130,7 @@ async def publish_post_async(post_id: int) -> Dict[str, Any]:
                 platform = platform_result["platform"]
                 success = platform_result.get("success", False)
                 
-                await crud.PostResultCRUD.create_result(
+                await PostResultCRUD.create_result(
                     db=db,
                     post_id=post_id,
                     platform=platform,
@@ -144,7 +147,7 @@ async def publish_post_async(post_id: int) -> Dict[str, Any]:
             else:
                 final_status = "failed"
             
-            await crud.PostCRUD.update_post_status(
+            await PostCRUD.update_post_status(
                 db, post_id, final_status
             )
             await db.commit()
@@ -162,7 +165,7 @@ async def publish_post_async(post_id: int) -> Dict[str, Any]:
         
         try:
             async with AsyncSessionLocal() as db:
-                await crud.PostCRUD.update_post_status(
+                await PostCRUD.update_post_status(
                     db, post_id, "failed",
                     error_messages={"error": str(e)}
                 )
@@ -217,7 +220,7 @@ def check_scheduled_posts():
         try:
             async with AsyncSessionLocal() as db:
                 # Get posts that are scheduled and ready
-                posts = await crud.PostCRUD.get_scheduled_posts(db, limit=50)
+                posts = await PostCRUD.get_scheduled_posts(db, limit=50)
                 
                 if not posts:
                     print("✓ No scheduled posts ready for publishing")
@@ -239,3 +242,35 @@ def check_scheduled_posts():
         print(f"❌ Error checking scheduled posts: {e}")
         import traceback
         traceback.print_exc()
+        
+@celery_app.task(name="app.tasks.scheduled_tasks.fetch_all_posts_analytics")
+def fetch_all_posts_analytics():
+    async def run():
+        engine = create_task_engine()
+        async with get_async_session_local(engine)() as db:
+            # Get published posts without recent analytics
+            posts = await PostCRUD.get_published_posts(db, last_fetched_before=datetime.utcnow() - timedelta(hours=1))
+            for post in posts:
+                fetch_post_analytics_task.delay(post.id)
+    asyncio.run(run())
+
+@celery_app.task(name="app.tasks.scheduled_tasks.fetch_post_analytics_task")
+def fetch_post_analytics_task(post_id: int):
+    async def run():
+        engine = create_task_engine()
+        async with get_async_session_local(engine)() as db:
+            post = await PostCRUD.get_post(db, post_id)
+            if not post:
+                return
+            for platform in post.platforms:
+                connection = await SocialConnectionCRUD.get_by_platform(db, post.user_id, platform)
+                if connection:
+                    service = SocialService.get_platform_service(platform, connection)
+                    try:
+                        metrics = await service.fetch_post_metrics(post.platform_post_id[platform])  # Assume dict of IDs per platform
+                        analytics = await PostAnalyticsCRUD.create_or_update(db, post_id, platform, metrics)  # Add create_or_update method
+                    except Exception as e:
+                        await PostAnalyticsCRUD.update_error(db, post_id, platform, str(e))
+    asyncio.run(run())
+
+# Similar for aggregate_user_analytics_task: Query PostAnalytics, compute sums/avgs, update summaries.

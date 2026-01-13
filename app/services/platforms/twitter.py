@@ -370,3 +370,22 @@ class TwitterService(BasePlatformService):
         except Exception as e:
             print(f"🐦 Twitter: Token validation error - {e}")
             return False
+    
+    async def fetch_post_metrics(self, platform_post_id: str) -> Dict[str, Any]:
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.twitter.com/2/tweets/{platform_post_id}?tweet.fields=public_metrics",
+                headers=headers
+            )
+            if response.status_code == 200:
+                data = response.json()["data"]["public_metrics"]
+                return {
+                    "likes": data["like_count"],
+                    "retweets": data["retweet_count"],
+                    "replies": data["reply_count"],
+                    "quotes": data["quote_count"],
+                    "impressions": data.get("impression_count", 0)
+                }
+            else:
+                raise Exception(f"Failed to fetch metrics: {response.text}")
