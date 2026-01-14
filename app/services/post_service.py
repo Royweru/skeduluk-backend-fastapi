@@ -12,10 +12,10 @@ from sqlalchemy import select, and_
 from pathlib import Path
 import mimetypes
 
-from .. import crud, models, schemas
+from .. import  models, schemas
 from ..config import settings
 from ..services.transcription_service import TranscriptionService
-
+from ..crud import user_crud 
 from ..services.storage.cloudinary import upload_to_cloudinary
 
 class PostService:
@@ -86,7 +86,7 @@ class PostService:
         await db.commit()
         await db.refresh(db_post)
         
-        await crud.UserCRUD.increment_post_count(db, user_id)
+        await user_crud.UserCRUD.increment_post_count(db, user_id)
         
         return db_post
     

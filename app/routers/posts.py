@@ -28,7 +28,7 @@ async def create_post(
     """
     Create a post with platform-specific content support
     
-    ✅ FIXED: Uploads happen BEFORE database transaction to prevent timeout
+    FIXED: Uploads happen BEFORE database transaction to prevent timeout
     """
     try:
         # ===================================================================
@@ -66,7 +66,7 @@ async def create_post(
         # ===================================================================
         # STEP 2: Upload media files FIRST (SLOW OPERATION)
         
-        print(f"📤 Starting media uploads for user {current_user.id}...")
+        print(f"Starting media uploads for user {current_user.id}...")
         
         # Upload images
         image_urls = []
@@ -74,9 +74,9 @@ async def create_post(
             try:
                 print(f"📸 Uploading {len(images)} image(s)...")
                 image_urls = await PostService.upload_images(images, current_user.id)
-                print(f"✅ Uploaded {len(image_urls)} images")
+                print(f"Uploaded {len(image_urls)} images")
             except Exception as e:
-                print(f"❌ Image upload failed: {e}")
+                print(f"Image upload failed: {e}")
                 raise HTTPException(500, f"Failed to upload images: {str(e)}")
         
         # Upload videos
@@ -85,9 +85,9 @@ async def create_post(
             try:
                 print(f"📹 Uploading {len(videos)} video(s)...")
                 video_urls = await PostService.upload_videos(videos, current_user.id)
-                print(f"✅ Uploaded {len(video_urls)} videos")
+                print(f"Uploaded {len(video_urls)} videos")
             except Exception as e:
-                print(f"❌ Video upload failed: {e}")
+                print(f"Video upload failed: {e}")
                 raise HTTPException(500, f"Failed to upload videos: {str(e)}")
         
         # Upload audio
@@ -101,17 +101,17 @@ async def create_post(
                 transcription = await PostService.transcribe_audio(audio_file_url)
                 if transcription:
                     original_content = f"{original_content}\n\n[Audio transcription]: {transcription}"
-                print(f"✅ Uploaded and transcribed audio")
+                print(f"Uploaded and transcribed audio")
             except Exception as e:
                 print(f"⚠️ Audio processing error: {e}")
                 # Don't fail the whole request if audio fails
         
-        print(f"✅ All media uploads completed")
+        print(f"All media uploads completed")
         
         # ===================================================================
         # STEP 3: Save to database (FAST - only metadata, URLs already uploaded)
         # ===================================================================
-        # ✅ Database transaction is now SUPER FAST (milliseconds, not minutes)
+        # Database transaction is now SUPER FAST (milliseconds, not minutes)
         
         print(f"💾 Saving post to database...")
         
@@ -126,9 +126,9 @@ async def create_post(
             audio_file_url=audio_file_url
         )
         
-        # ✅ This is FAST because media is already uploaded
+        # This is FAST because media is already uploaded
         post = await PostService.create_post(db, post_data, current_user.id)
-        print(f"✅ Created post ID: {post.id}")
+        print(f"Created post ID: {post.id}")
         
         # ===================================================================
         # STEP 4: Convert to response and queue for publishing
@@ -155,7 +155,7 @@ async def create_post(
         if not scheduled_for:
             from app.tasks.scheduled_tasks import publish_post_task
             task = publish_post_task.delay(post.id)
-            print(f"📤 Queued post {post.id} for publishing. Task: {task.id}")
+            print(f"Queued post {post.id} for publishing. Task: {task.id}")
             
             response_data = post_response.model_dump()
             response_data["message"] = f"Post is being published to {len(platforms_list)} platform(s)"
@@ -171,7 +171,7 @@ async def create_post(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error creating post: {str(e)}")
+        print(f"Error creating post: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(500, f"Failed to create post: {str(e)}")
@@ -194,10 +194,10 @@ async def get_post_status(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
     
-    from app.crud import PostResultCRUD
+    from app.crud.post_crud import PostResultCRUD
     results = await PostResultCRUD.get_results_by_post(db, post_id)
     
-    # ✅ FIX: Parse platforms JSON string to array
+    # FIX: Parse platforms JSON string to array
     platforms_list = []
     if post.platforms:
         if isinstance(post.platforms, str):
@@ -632,7 +632,7 @@ async def get_calendar_events(
                 "scheduled_for": post.scheduled_for.isoformat() if post.scheduled_for else None,
                 "created_at": post.created_at.isoformat(),
                 "error_message": post.error_message,
-                "color": _get_status_color(post.status),  # ✅ ADD THIS
+                "color": _get_status_color(post.status),  # ADD THIS
                 "allDay": False,
             })
         

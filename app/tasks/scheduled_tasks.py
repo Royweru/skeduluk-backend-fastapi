@@ -9,12 +9,14 @@ import json
 from datetime import datetime
 from typing import List, Dict, Any
 
+from sqlalchemy import select, and_
+
 from app.celery_app import celery_app
-from app import models, crud
+from app import models
 from app.services.social_service import SocialService
 from app.database import create_task_engine, get_async_session_local
 
-from app.crud.post_crud import PostCRUD
+from app.crud.post_crud import PostCRUD, PostResultCRUD
 from app.crud.social_connection_crud import SocialConnectionCRUD
 from app.services.analytics.analytics_service import AnalyticsService
 
@@ -30,9 +32,9 @@ async def publish_post_async(post_id: int) -> Dict[str, Any]:
     try:
         async with AsyncSessionLocal() as db:
             # Get post
-            post = await crud.PostCRUD.get_post_by_id(db, post_id)
+            post = await PostCRUD.get_post_by_id(db, post_id)
             if not post:
-                print(f"❌ Post {post_id} not found")
+                print(f" Post {post_id} not found")
                 return {
                     "success": False,
                     "error": "Post not found"
@@ -54,13 +56,13 @@ async def publish_post_async(post_id: int) -> Dict[str, Any]:
             print(f"{'='*60}\n")
             
             # Update status to posting
-            await crud.PostCRUD.update_post_status(db, post_id, "posting")
+            await PostCRUD.update_post_status(db, post_id, "posting")
             await db.commit()
             
             # Get connections for selected platforms
             connections: List[models.SocialConnection] = []
             for platform in platforms:
-                conn = await crud.SocialConnectionCRUD.get_connection_by_platform(
+                conn = await SocialConnectionCRUD.get_connection_by_platform(
                     db, post.user_id, platform.upper()
                 )
                 if conn:
@@ -69,7 +71,7 @@ async def publish_post_async(post_id: int) -> Dict[str, Any]:
                     print(f"⚠️  No connection found for {platform}")
             
             if not connections:
-                await crud.PostCRUD.update_post_status(
+                await PostCRUD.update_post_status(
                     db, post_id, "failed",
                     error_messages={"error": "No active connections found"}
                 )
@@ -153,13 +155,13 @@ async def publish_post_async(post_id: int) -> Dict[str, Any]:
             await db.commit()
             
             print(f"\n{'='*60}")
-            print(f"✅ Task completed: {result['successful']}/{result['total_platforms']} platforms succeeded")
+            print(f"Task completed: {result['successful']}/{result['total_platforms']} platforms succeeded")
             print(f"{'='*60}\n")
             
             return result
             
     except Exception as e:
-        print(f"❌ Error publishing post {post_id}: {e}")
+        print(f" Error publishing post {post_id}: {e}")
         import traceback
         traceback.print_exc()
         
@@ -196,7 +198,7 @@ def publish_post_task(post_id: int) -> Dict[str, Any]:
         result = asyncio.run(publish_post_async(post_id))
         return result
     except Exception as e:
-        print(f"❌ Task error: {e}")
+        print(f" Task error: {e}")
         import traceback
         traceback.print_exc()
         return {
@@ -239,15 +241,12 @@ def check_scheduled_posts():
     try:
         asyncio.run(check_async())
     except Exception as e:
-        print(f"❌ Error checking scheduled posts: {e}")
+        print(f" Error checking scheduled posts: {e}")
         import traceback
         traceback.print_exc()
 
 @celery_app.task(name="app.tasks.scheduled_tasks.fetch_post_analytics_task")
 def fetch_post_analytics_task(post_id: int, user_id: int):
-    """
-    Celery task to fetch analytics for a single post.
-    """
     print(f"📊 Fetching analytics for post {post_id}")
     
     async def fetch_async():
@@ -261,14 +260,14 @@ def fetch_post_analytics_task(post_id: int, user_id: int):
                 )
                 
                 if result.get("success"):
-                    print(f"✅ Analytics fetched for post {post_id}")
+                    print(f"Analytics fetched for post {post_id}")
                     successful = sum(
                         1 for p in result["platforms"].values() 
                         if p.get("success")
                     )
-                    print(f"   {successful}/{len(result['platforms'])} platforms succeeded")
+                    print(f"{successful}/{len(result['platforms'])} platforms succeeded")
                 else:
-                    print(f"❌ Failed to fetch analytics: {result.get('error')}")
+                    print(f" Failed to fetch analytics: {result.get('error')}")
                 
                 return result
         finally:
@@ -278,7 +277,7 @@ def fetch_post_analytics_task(post_id: int, user_id: int):
         result = asyncio.run(fetch_async())
         return result
     except Exception as e:
-        print(f"❌ Analytics task error: {e}")
+        print(f" Analytics task error: {e}")
         import traceback
         traceback.print_exc()
         return {"success": False, "error": str(e)}
@@ -324,8 +323,8 @@ def fetch_all_recent_analytics():
     
     try:
         result = asyncio.run(fetch_async())
-        print(f"✅ Queued {result.get('queued', 0)} posts for analytics")
+        print(f"Queued {result.get('queued', 0)} posts for analytics")
         return result
     except Exception as e:
-        print(f"❌ Error queueing analytics tasks: {e}")
+        print(f" Error queueing analytics tasks: {e}")
         return {"error": str(e)}
