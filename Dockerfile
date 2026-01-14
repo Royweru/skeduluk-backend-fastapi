@@ -1,22 +1,29 @@
-FROM python:3.11-slim
+# Use a lightweight Python base image
+FROM python:3.10-slim
+
+# 1. Install system tools: Supervisor and Timezone Data
+RUN apt-get update && apt-get install -y \
+    supervisor \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Set the Timezone to Nairobi (matches your requirement)
+ENV TZ=Africa/Nairobi
 
 WORKDIR /app
 
-# Install system dependencies for psycopg2
-RUN apt-get update && apt-get install -y \
-    gcc \
-    postgresql-client \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements and install
+# 3. Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# 4. Copy your application code
 COPY . .
 
-# Expose port
-EXPOSE 8000
+# 5. Copy the supervisor configuration to the correct system folder
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 6. Expose the port Render expects
+EXPOSE 10000
+
+# 7. Start Supervisor (which will start Uvicorn, Celery, and Beat)
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

@@ -10,6 +10,7 @@ from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import select
 
 from .. import models, auth
+from ..utils.security import verify_password , get_password_hash
 from ..database import get_async_db
 from ..services.auth_service import AuthService
 from ..services.oauth_service import OAuthService
@@ -118,7 +119,7 @@ async def login(
         user = result.scalar_one_or_none()
     
     # Verify password
-    if not user or not auth.verify_password(form_data.password, user.hashed_password):
+    if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username/email or password",
