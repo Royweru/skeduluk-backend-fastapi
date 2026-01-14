@@ -4,7 +4,7 @@ import uvicorn
 from fastapi import FastAPI
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import auth, posts, social, users, payments, templates
+from .routers import auth, posts, social, users, payments, templates, analytics
 from .config import settings
 
 app = FastAPI(title=settings.APP_NAME)
@@ -40,6 +40,7 @@ app.include_router(posts.router)
 app.include_router(social.router)
 app.include_router(payments.router)
 app.include_router(templates.router)
+app.include_router(analytics.router)
 @app.get("/")
 async def root():
     return {"message": "Welcome to Skeduluk API"}

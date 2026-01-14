@@ -225,10 +225,28 @@ class PostAnalytics(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     post_id = Column(Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True)
-    # ✅ Changed from Enum to String
     platform = Column(String, nullable=False, index=True)
-    metrics = Column(JSONB, nullable=True)
-    fetched_at = Column(DateTime, nullable=True, index=True)
+    
+    # Core metrics (common across platforms)
+    views = Column(Integer, server_default=text('0'))
+    impressions = Column(Integer, server_default=text('0'))
+    reach = Column(Integer, server_default=text('0'))
+    
+    # Engagement metrics
+    likes = Column(Integer, server_default=text('0'))
+    comments = Column(Integer, server_default=text('0'))
+    shares = Column(Integer, server_default=text('0'))
+    saves = Column(Integer, server_default=text('0'))
+    clicks = Column(Integer, server_default=text('0'))
+    
+    # Platform-specific metrics (stored as JSON)
+    platform_specific_metrics = Column(JSONB, nullable=True)
+    
+    # Engagement rate calculation
+    engagement_rate = Column(Float, server_default=text('0.0'))
+    
+    # Metadata
+    fetched_at = Column(DateTime, nullable=False, index=True, server_default=text('CURRENT_TIMESTAMP'))
     error = Column(Text, nullable=True)
     
     __table_args__ = (

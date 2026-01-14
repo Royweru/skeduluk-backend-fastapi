@@ -31,16 +31,11 @@ celery_config = {
             "task": "app.tasks.scheduled_tasks.check_scheduled_posts",
             "schedule": 60.0,
         },
-        
         'fetch-analytics-hourly': {
-        'task': 'app.tasks.scheduled_tasks.fetch_all_posts_analytics',
-        'schedule': crontab(minute=0), 
+            'task': 'app.tasks.scheduled_tasks.fetch_all_recent_analytics',
+            'schedule': crontab(minute=0),  # Every hour at minute 0
         },
-       'aggregate-summaries-daily': {
-        'task': 'app.tasks.scheduled_tasks.aggregate_all_users_summaries',
-        'schedule': crontab(hour=2, minute=0),  # 2AM daily
-    },
-    },
+    }
 }
 
 # 🔐 FIX: Explicit SSL handling for rediss://

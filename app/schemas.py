@@ -374,3 +374,91 @@ class TemplateAnalyticsResponse(BaseModel):
     platform_breakdown: Dict[str, int]
     recent_posts: List[Dict[str, Any]]
     engagement_trend: List[Dict[str, Any]]
+    
+    
+# Add these to your existing app/schemas.py file
+
+# ==================== ANALYTICS SCHEMAS ====================
+
+class PostAnalyticsBase(BaseModel):
+    platform: str
+    views: int = 0
+    impressions: int = 0
+    reach: int = 0
+    likes: int = 0
+    comments: int = 0
+    shares: int = 0
+    saves: int = 0
+    clicks: int = 0
+    engagement_rate: float = 0.0
+    platform_specific_metrics: Optional[Dict[str, Any]] = None
+
+
+class PostAnalyticsResponse(PostAnalyticsBase):
+    id: int
+    post_id: int
+    fetched_at: datetime
+    error: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class AnalyticsSummaryResponse(BaseModel):
+    total_posts: int
+    total_views: int
+    total_impressions: int
+    total_likes: int
+    total_comments: int
+    total_shares: int
+    total_engagement: int
+    avg_engagement_rate: float
+    by_platform: Dict[str, Any]
+    date_range: Dict[str, str]
+
+
+class TopPerformingPost(BaseModel):
+    post_id: int
+    content: str
+    platform: str
+    views: int
+    likes: int
+    comments: int
+    shares: int
+    engagement_rate: float
+    created_at: str
+
+
+class AnalyticsOverTime(BaseModel):
+    date: str
+    views: int
+    likes: int
+    comments: int
+    shares: int
+    engagement_rate: float
+
+
+class DashboardAnalyticsResponse(BaseModel):
+    summary: AnalyticsSummaryResponse
+    top_posts: List[TopPerformingPost]
+    analytics_over_time: List[AnalyticsOverTime]
+    period: Dict[str, Any]
+
+
+class PlatformComparisonResponse(BaseModel):
+    platforms: Dict[str, Any]
+    best_platform: Optional[str]
+    best_engagement_rate: float
+    total_posts: int
+    total_engagement: int
+
+
+class FetchAnalyticsRequest(BaseModel):
+    post_id: int
+
+
+class FetchAnalyticsResponse(BaseModel):
+    success: bool
+    post_id: int
+    platforms: Dict[str, Any]
+    fetched_at: str

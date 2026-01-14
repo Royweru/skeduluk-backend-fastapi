@@ -16,7 +16,7 @@ from app.database import create_task_engine, get_async_session_local
 
 from app.crud.post_crud import PostCRUD
 from app.crud.social_connection_crud import SocialConnectionCRUD
-from app.crud.analytics_crud import PostAnalyticsCRUD
+from app.services.analytics.analytics_service import AnalyticsService
 
 async def publish_post_async(post_id: int) -> Dict[str, Any]:
     """
@@ -242,35 +242,90 @@ def check_scheduled_posts():
         print(f"❌ Error checking scheduled posts: {e}")
         import traceback
         traceback.print_exc()
-        
-@celery_app.task(name="app.tasks.scheduled_tasks.fetch_all_posts_analytics")
-def fetch_all_posts_analytics():
-    async def run():
-        engine = create_task_engine()
-        async with get_async_session_local(engine)() as db:
-            # Get published posts without recent analytics
-            posts = await PostCRUD.get_published_posts(db, last_fetched_before=datetime.utcnow() - timedelta(hours=1))
-            for post in posts:
-                fetch_post_analytics_task.delay(post.id)
-    asyncio.run(run())
 
 @celery_app.task(name="app.tasks.scheduled_tasks.fetch_post_analytics_task")
-def fetch_post_analytics_task(post_id: int):
-    async def run():
+def fetch_post_analytics_task(post_id: int, user_id: int):
+    """
+    Celery task to fetch analytics for a single post.
+    """
+    print(f"📊 Fetching analytics for post {post_id}")
+    
+    async def fetch_async():
         engine = create_task_engine()
-        async with get_async_session_local(engine)() as db:
-            post = await PostCRUD.get_post(db, post_id)
-            if not post:
-                return
-            for platform in post.platforms:
-                connection = await SocialConnectionCRUD.get_by_platform(db, post.user_id, platform)
-                if connection:
-                    service = SocialService.get_platform_service(platform, connection)
-                    try:
-                        metrics = await service.fetch_post_metrics(post.platform_post_id[platform])  # Assume dict of IDs per platform
-                        analytics = await PostAnalyticsCRUD.create_or_update(db, post_id, platform, metrics)  # Add create_or_update method
-                    except Exception as e:
-                        await PostAnalyticsCRUD.update_error(db, post_id, platform, str(e))
-    asyncio.run(run())
+        AsyncSessionLocal = get_async_session_local(engine)
+        
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await AnalyticsService.fetch_post_analytics(
+                    db, post_id, user_id
+                )
+                
+                if result.get("success"):
+                    print(f"✅ Analytics fetched for post {post_id}")
+                    successful = sum(
+                        1 for p in result["platforms"].values() 
+                        if p.get("success")
+                    )
+                    print(f"   {successful}/{len(result['platforms'])} platforms succeeded")
+                else:
+                    print(f"❌ Failed to fetch analytics: {result.get('error')}")
+                
+                return result
+        finally:
+            await engine.dispose()
+    
+    try:
+        result = asyncio.run(fetch_async())
+        return result
+    except Exception as e:
+        print(f"❌ Analytics task error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
 
-# Similar for aggregate_user_analytics_task: Query PostAnalytics, compute sums/avgs, update summaries.
+
+@celery_app.task(name="app.tasks.scheduled_tasks.fetch_all_recent_analytics")
+def fetch_all_recent_analytics():
+    """
+    Periodic task to fetch analytics for all recent posts.
+    Runs hourly via Celery Beat.
+    """
+    print("📊 Fetching analytics for all recent posts...")
+    
+    async def fetch_async():
+        engine = create_task_engine()
+        AsyncSessionLocal = get_async_session_local(engine)
+        
+        try:
+            async with AsyncSessionLocal() as db:
+                # Get posts from last 7 days that are posted
+                from datetime import datetime, timedelta
+                since = datetime.utcnow() - timedelta(days=7)
+                
+                query = select(models.Post).where(
+                    and_(
+                        models.Post.status.in_(['posted', 'partial']),
+                        models.Post.created_at >= since
+                    )
+                ).limit(100)  # Process 100 at a time
+                
+                result = await db.execute(query)
+                posts = result.scalars().all()
+                
+                print(f"📋 Found {len(posts)} posts to fetch analytics for")
+                
+                # Queue each post for analytics fetching
+                for post in posts:
+                    fetch_post_analytics_task.delay(post.id, post.user_id)
+                
+                return {"queued": len(posts)}
+        finally:
+            await engine.dispose()
+    
+    try:
+        result = asyncio.run(fetch_async())
+        print(f"✅ Queued {result.get('queued', 0)} posts for analytics")
+        return result
+    except Exception as e:
+        print(f"❌ Error queueing analytics tasks: {e}")
+        return {"error": str(e)}
