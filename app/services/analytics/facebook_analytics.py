@@ -2,7 +2,7 @@
 
 from .base_analytics import BaseAnalyticsFetcher
 import httpx
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 class FacebookAnalyticsFetcher(BaseAnalyticsFetcher):
     """Facebook analytics implementation"""
