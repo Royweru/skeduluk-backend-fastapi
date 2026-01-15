@@ -22,13 +22,21 @@ class AnalyticsService:
     
     # Platform fetcher mapping
     FETCHERS = {
-        "TWITTER": TwitterAnalyticsFetcher(),
-        "FACEBOOK": FacebookAnalyticsFetcher(),
-        "INSTAGRAM": InstagramAnalyticsFetcher(),
-        "LINKEDIN": LinkedInAnalyticsFetcher(),
-        "TIKTOK": TikTokAnalyticsFetcher(),
-        "YOUTUBE": YouTubeAnalyticsFetcher(),
+        "TWITTER": TwitterAnalyticsFetcher,
+        "FACEBOOK": FacebookAnalyticsFetcher,
+        "INSTAGRAM": InstagramAnalyticsFetcher,
+        "LINKEDIN": LinkedInAnalyticsFetcher,
+        "TIKTOK": TikTokAnalyticsFetcher,
+        "YOUTUBE": YouTubeAnalyticsFetcher,
     }
+    
+    @classmethod
+    def _get_fetcher(cls, platform: str):
+        """Get or instantiate a fetcher for the given platform."""
+        fetcher_class = cls.FETCHERS.get(platform)
+        if fetcher_class:
+            return fetcher_class()
+        return None
     
     @classmethod
     async def fetch_post_analytics(
@@ -94,7 +102,7 @@ class AnalyticsService:
                 continue
             
             # Get fetcher for platform
-            fetcher = cls.FETCHERS.get(platform)
+            fetcher = cls._get_fetcher(platform)
             if not fetcher:
                 platform_analytics[platform] = {
                     "success": False,
