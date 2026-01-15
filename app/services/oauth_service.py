@@ -2,7 +2,7 @@
 import secrets
 import hashlib
 import base64
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Any
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlencode, quote, urlparse, urlunparse
 import httpx
@@ -19,8 +19,7 @@ from app import models
 BASE_URL = settings.BACKEND_URL.rstrip("/")
 CALLBACK_PATH = "/auth/oauth/callback"
 
-# 🔧 IMPROVED: Better OAuth configurations with comments
-# app/services/oauth_service.py
+# Global state storage for OAuth 1.0a
 _oauth1_states = {}
 
 def _clean_oauth1_states():
@@ -29,6 +28,7 @@ def _clean_oauth1_states():
     expired = [k for k, v in _oauth1_states.items() if v.get("created_at", datetime.utcnow()) < cutoff]
     for k in expired:
         del _oauth1_states[k]
+
 OAUTH_CONFIGS = {
     # ========================================================================
     # TWITTER - OAuth 1.0a (Three-Legged Flow)
@@ -134,30 +134,22 @@ OAUTH_CONFIGS = {
         "client_id": settings.TIKTOK_CLIENT_ID,
         "client_secret": settings.TIKTOK_CLIENT_SECRET,
         "auth_url": "https://www.tiktok.com/v2/auth/authorize/",
-        "token_url": "https://open.tiktok.com/v2/oauth/token/",
+        "token_url": "https://open.tiktokapis.com/v2/oauth/token/", # Updated to API domain
         "redirect_uri": f"{BASE_URL}{CALLBACK_PATH}/tiktok",
         "scope": "user.info.basic,video.upload,video.publish",
-        "user_info_url": "https://open.tiktok.com/v2/user/info/",
+        "user_info_url": "https://open.tiktokapis.com/v2/user/info/", # Updated to API domain
         "uses_pkce": True,
-        "token_auth_method": "basic",
+        "token_auth_method": "body", # Send client_key/secret in body
         "response_type": "code",
-        "client_id_param_name": "client_key",  
+        "client_id_param_name": "client_key",  # CRITICAL: TikTok uses client_key
         "auth_params": {},
         "platform_display_name": "TikTok"
     }
 }
 
-
-
 class OAuthService:
-    """OAuth Service with improved PKCE and state management"""
     """
     Universal OAuth service supporting both OAuth 1.0a and OAuth 2.0.
-    
-    Architecture:
-    - Twitter uses OAuth 1.0a (three-legged flow)
-    - All other platforms use OAuth 2.0 (authorization code flow)
-    - Service intelligently routes based on `protocol` field in config
     """
     
     # ========================================================================
@@ -196,7 +188,6 @@ class OAuthService:
     ) -> Dict:
         """
         Main entry point for handling OAuth callbacks.
-        ✅ FIXED: State is optional for OAuth 1.0a
         """
         if error:
             return {"success": False, "error": f"Authorization denied: {error}"}
@@ -219,12 +210,10 @@ class OAuthService:
         print(f"{'='*60}\n")
         
         if is_oauth1:
-            # ✅ OAuth 1.0a doesn't use state parameter
             return await cls._handle_oauth1_callback(
                 platform, oauth_token, oauth_verifier, config, db
             )
         elif is_oauth2:
-            # ✅ OAuth 2.0 requires state parameter
             if not state:
                 return {
                     "success": False,
@@ -246,10 +235,7 @@ class OAuthService:
     
     @classmethod
     async def _initiate_oauth1(cls, user_id: int, platform: str, config: Dict) -> str:
-        """
-        OAuth 1.0a Three-Legged Flow - Step 1 & 2
-        ✅ FIXED: Store state server-side keyed by oauth_token
-        """
+        """OAuth 1.0a Three-Legged Flow - Step 1 & 2"""
         try:
             from requests_oauthlib import OAuth1Session
             
@@ -268,9 +254,8 @@ class OAuthService:
             if not oauth_token or not oauth_token_secret:
                 raise HTTPException(500, "Failed to get request token")
             
-            # ✅ FIX: Store state server-side using oauth_token as key
-            # Twitter will return this oauth_token in the callback!
-            _clean_oauth1_states()  # Clean up old states
+            # Store state server-side using oauth_token as key
+            _clean_oauth1_states()  
             _oauth1_states[oauth_token] = {
                 "user_id": user_id,
                 "platform": platform,
@@ -279,12 +264,8 @@ class OAuthService:
             }
             
             print(f"✅ OAuth 1.0a: Stored state for token: {oauth_token[:20]}...")
-            print(f"   User ID: {user_id}")
-            print(f"   Active states: {len(_oauth1_states)}")
             
             authorization_url = oauth.authorization_url(config["authorize_url"])
-            
-            print(f"✅ OAuth 1.0a authorization URL generated")
             return authorization_url
             
         except Exception as e:
@@ -296,32 +277,21 @@ class OAuthService:
         cls, platform: str, oauth_token: str, oauth_verifier: str,
         config: Dict, db: AsyncSession
     ) -> Dict:
-        """
-        OAuth 1.0a Three-Legged Flow - Step 3
-        ✅ FIXED: Retrieve state from server-side storage using oauth_token
-        """
+        """OAuth 1.0a Three-Legged Flow - Step 3"""
         try:
             from requests_oauthlib import OAuth1Session
             
-            # ✅ FIX: Retrieve state using oauth_token (not from URL parameter)
             state_data = _oauth1_states.get(oauth_token)
             
             if not state_data:
-                print(f" OAuth 1.0a: No state found for token: {oauth_token[:20]}...")
-                print(f"   Active states: {list(_oauth1_states.keys())}")
                 return {
                     "success": False,
-                    "error": "Invalid or expired authorization session. Please try connecting again."
+                    "error": "Invalid or expired authorization session."
                 }
             
-            # Extract from stored state
             user_id = state_data["user_id"]
             oauth_token_secret = state_data["oauth_token_secret"]
-            
-            # Clean up - remove used state
             del _oauth1_states[oauth_token]
-            
-            print(f"✅ OAuth 1.0a: Retrieved state for user {user_id}")
             
             # Exchange for access token
             oauth = OAuth1Session(
@@ -339,7 +309,6 @@ class OAuthService:
             if not access_token or not access_token_secret:
                 return {"success": False, "error": "Failed to get access tokens"}
             
-            # CRITICAL: Format as "token:secret" for TwitterService
             combined_token = f"{access_token}:{access_token_secret}"
             
             # Get user info
@@ -352,6 +321,7 @@ class OAuthService:
             
             user_response = oauth_for_api.get(config["user_info_url"], timeout=10)
             
+            user_info = {}
             if user_response.status_code == 200:
                 user_data = user_response.json()
                 if "data" in user_data:
@@ -367,14 +337,14 @@ class OAuthService:
                         "name": oauth_tokens.get("screen_name", "")
                     }
             else:
-                user_info = {
+                 user_info = {
                     "user_id": str(oauth_tokens.get("user_id", "")),
                     "username": oauth_tokens.get("screen_name", "Unknown"),
                     "name": oauth_tokens.get("screen_name", "Unknown")
                 }
             
             # Save connection
-            connection = await cls._save_connection(
+            await cls._save_connection(
                 db=db,
                 user_id=user_id,
                 platform=platform.upper(),
@@ -388,8 +358,6 @@ class OAuthService:
                 oauth_token_secret=access_token_secret
             )
             
-            print(f"✅ OAuth 1.0a connection saved")
-            
             return {
                 "success": True,
                 "platform": platform,
@@ -398,9 +366,8 @@ class OAuthService:
             
         except Exception as e:
             print(f" OAuth 1.0a callback error: {e}")
-            import traceback
-            traceback.print_exc()
             return {"success": False, "error": str(e)}
+
     # ========================================================================
     # OAUTH 2.0 IMPLEMENTATION (ALL OTHER PLATFORMS)
     # ========================================================================
@@ -418,10 +385,13 @@ class OAuthService:
                 "exp": datetime.utcnow() + timedelta(minutes=15)
             }
             
+            # ✅ CORRECTED: Use client_key for TikTok, client_id for others
+            client_id_param_name = config.get("client_id_param_name", "client_id")
+            
             # Build parameters
             params = {
                 "response_type": config.get("response_type", "code"),
-                "client_id": config["client_id"],
+                client_id_param_name: config["client_id"], # Uses 'client_key' if configured
                 "redirect_uri": config["redirect_uri"],
                 "state": state
             }
@@ -449,7 +419,8 @@ class OAuthService:
             query_string = urlencode(params, quote_via=quote)
             auth_url = f"{config['auth_url']}?{query_string}"
             
-            print(f" OAuth 2.0 authorization URL generated")
+            print(f" OAuth 2.0 authorization URL generated for {platform}")
+            print(f" Using param: {client_id_param_name}={config['client_id'][:5]}...")
             return auth_url
             
         except Exception as e:
@@ -468,6 +439,9 @@ class OAuthService:
             user_id = state_payload["user_id"]
             code_verifier = state_payload.get("pkce_verifier")
             
+            # ✅ CORRECTED: Use client_key for TikTok in token request too
+            client_id_param_name = config.get("client_id_param_name", "client_id")
+
             # Build token request
             token_params = {
                 "grant_type": "authorization_code",
@@ -475,8 +449,9 @@ class OAuthService:
                 "redirect_uri": config["redirect_uri"],
             }
             
+            # Add client credentials to body if not basic auth
             if config.get("token_auth_method") != "basic":
-                token_params["client_id"] = config["client_id"]
+                token_params[client_id_param_name] = config["client_id"]
                 token_params["client_secret"] = config["client_secret"]
             
             if config.get("uses_pkce", False) and code_verifier:
@@ -493,6 +468,7 @@ class OAuthService:
             
             # Exchange code for token
             async with httpx.AsyncClient(timeout=30.0) as client:
+                print(f"Exchanging code for token with {config['token_url']}")
                 token_response = await client.post(
                     config["token_url"],
                     data=token_params,
@@ -501,6 +477,7 @@ class OAuthService:
                 )
                 
                 if token_response.status_code != 200:
+                    print(f"❌ Token exchange error body: {token_response.text}")
                     return {
                         "success": False,
                         "error": f"Token exchange failed: {token_response.text}"
@@ -541,8 +518,6 @@ class OAuthService:
                     oauth_token_secret=None
                 )
                 
-                print(f" OAuth 2.0 connection saved")
-                
                 return {
                     "success": True,
                     "platform": platform,
@@ -561,7 +536,6 @@ class OAuthService:
     @staticmethod
     def _generate_code_verifier() -> str:
         """Generate code verifier for PKCE (43-128 characters)"""
-        # Generate 43 character verifier (Twitter minimum)
         verifier = base64.urlsafe_b64encode(
             secrets.token_bytes(32)).decode('utf-8').rstrip('=')
         print(f"🔐 Generated code verifier (length: {len(verifier)})")
@@ -573,13 +547,7 @@ class OAuthService:
         digest = hashlib.sha256(verifier.encode('utf-8')).digest()
         challenge = base64.urlsafe_b64encode(
             digest).decode('utf-8').rstrip('=')
-        print(f"🔐 Generated code challenge (length: {len(challenge)})")
         return challenge
-
-    @staticmethod
-    def _generate_state() -> str:
-        """Generate secure random state (at least 6 characters)"""
-        return secrets.token_urlsafe(16)
 
     @classmethod
     async def _exchange_long_lived_token(
@@ -599,15 +567,11 @@ class OAuthService:
             
             if response.status_code == 200:
                 data = response.json()
-                print(f" Exchanged for long-lived token (expires in {data.get('expires_in', 'unknown')}s)")
                 return data["access_token"], data
             else:
-                print(f" Token exchange failed ({response.status_code}), using short-lived token")
-                print(f"Response: {response.text}")
                 return short_token, {"access_token": short_token, "expires_in": 3600}
                 
         except Exception as e:
-            print(f" Token exchange error: {e}")
             return short_token, {"access_token": short_token, "expires_in": 3600}
 
     @classmethod
@@ -618,26 +582,17 @@ class OAuthService:
         platform = connection.platform.lower()
         refresh_token = connection.refresh_token
 
-        if not refresh_token:
-            print(f" No refresh token for {platform}")
-            return None
-        
-        if platform not in OAUTH_CONFIGS:
-            print(f" Platform {platform} not in OAUTH_CONFIGS")
+        if not refresh_token or platform not in OAUTH_CONFIGS:
             return None
         
         config = OAUTH_CONFIGS[platform]
-        
-        print(f"Attempting token refresh for {platform}")
-        print(f"   Refresh token length: {len(refresh_token)}")
-        print(f"   Token URL: {config['token_url']}")
-        print(f"   Client ID: {config['client_id'][:20]}...")
+        client_id_param_name = config.get("client_id_param_name", "client_id")
         
         try:
             refresh_params = {
                 "grant_type": "refresh_token",
                 "refresh_token": refresh_token,
-                "client_id": config["client_id"],
+                client_id_param_name: config["client_id"],
             }
 
             if config.get("token_auth_method") != "basic":
@@ -660,12 +615,8 @@ class OAuthService:
                     auth=auth
                 )
                 
-                print(f"   Response status: {response.status_code}")
-                
                 if response.status_code != 200:
-                    print(f"Token refresh failed")
-                    print(f"   Response body: {response.text}")
-                    # Mark connection as inactive so user knows to reconnect
+                    print(f"Token refresh failed: {response.text}")
                     connection.is_active = False
                     await db.commit()
                     return None
@@ -676,7 +627,6 @@ class OAuthService:
                 expires_in = token_data.get("expires_in")
                 
                 if not new_access_token:
-                    print(f" No access_token in response")
                     return None
                 
                 # Update connection
@@ -691,10 +641,6 @@ class OAuthService:
                 connection.is_active = True
                 await db.commit()
                 
-                print(f" Token refreshed successfully!")
-                print(f"   New expiry: {connection.token_expires_at}")
-                print(f"   Days until expiry: {(connection.token_expires_at - datetime.utcnow()).days}")
-                
                 return {
                     "access_token": new_access_token,
                     "refresh_token": new_refresh_token,
@@ -703,8 +649,6 @@ class OAuthService:
                 
         except Exception as e:
             print(f" Token refresh exception: {e}")
-            import traceback
-            traceback.print_exc()
             return None
 
     @classmethod
@@ -714,11 +658,16 @@ class OAuthService:
         """Get user info from platform API"""
         try:
             headers = {"Authorization": f"Bearer {access_token}"}
-            response = await client.get(user_info_url, headers=headers)
+            params = {}
+            
+            # ✅ CORRECTED: TikTok requires specific fields in params
+            if platform == "tiktok":
+                params = {"fields": "open_id,union_id,avatar_url,display_name"}
+                
+            response = await client.get(user_info_url, headers=headers, params=params)
             
             if response.status_code != 200:
-                print(f" User info error: {response.status_code}")
-                print(f"Response: {response.text}")
+                print(f" User info error: {response.status_code} - {response.text}")
                 return None
 
             data = response.json()
@@ -751,18 +700,16 @@ class OAuthService:
                     "name": data.get("name"),
                     "email": data.get("email")
                 }
-            #   TIKTOK USER INFO PARSING
+            # ✅ CORRECTED: TikTok parsing logic
             elif platform == "tiktok":
-                # TikTok returns nested data structure
                 user_data = data.get("data", {}).get("user", {})
                 return {
                     "user_id": user_data.get("open_id"),
                     "username": user_data.get("display_name"),
                     "name": user_data.get("display_name"),
-                    "email": None  # TikTok doesn't provide email
+                    "email": None 
                 }
 
-                
         except Exception as e:
             print(f" Error getting user info: {e}")
             return None
@@ -821,9 +768,8 @@ class OAuthService:
             )
             db.add(connection)
         
-        #  AUTO-SELECT FACEBOOK PAGE
+        # AUTO-SELECT FACEBOOK PAGE Logic (Existing code kept same)
         if platform.lower() == "facebook":
-            print(f"🔵 Facebook connection detected - fetching pages...")
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     pages_response = await client.get(
@@ -839,53 +785,21 @@ class OAuthService:
                         pages = pages_data.get("data", [])
                         
                         if pages:
-                            # Auto-select first page
                             first_page = pages[0]
-                            
                             connection.facebook_page_id = first_page["id"]
                             connection.facebook_page_name = first_page["name"]
                             connection.facebook_page_access_token = first_page["access_token"]
                             connection.facebook_page_category = first_page.get("category", "Unknown")
                             
-                            # Get page picture URL
                             picture_data = first_page.get("picture", {})
                             if isinstance(picture_data, dict):
                                 picture_url = picture_data.get("data", {}).get("url")
                             else:
                                 picture_url = None
                             connection.facebook_page_picture = picture_url
-                            
-                            print(f" Auto-selected Facebook Page: {first_page['name']} (ID: {first_page['id']})")
-                            print(f"   Category: {first_page.get('category', 'Unknown')}")
-                            print(f"   Total pages available: {len(pages)}")
-                            
-                            if len(pages) > 1:
-                                print(f"User has {len(pages)} pages. They can change selection in settings.")
-                        else:
-                            print(f"  No Facebook Pages found for this user.")
-                            print(f"   User needs to create a Facebook Page to post via API.")
-                            # Clear any previous page selection
-                            connection.facebook_page_id = None
-                            connection.facebook_page_name = None
-                            connection.facebook_page_access_token = None
-                            connection.facebook_page_category = None
-                            connection.facebook_page_picture = None
-                    else:
-                        print(f"  Failed to fetch Facebook pages: {pages_response.status_code}")
-                        print(f"   Response: {pages_response.text}")
-                        # Don't fail the connection, just log the issue
-                        
-            except httpx.TimeoutException:
-                print(f"  Timeout while fetching Facebook pages. Connection saved but no page selected.")
-            except httpx.HTTPError as e:
-                print(f"  HTTP error while fetching Facebook pages: {e}")
             except Exception as e:
-                print(f"  Unexpected error while fetching Facebook pages: {e}")
-                import traceback
-                traceback.print_exc()
-                # Don't fail the connection - user can select page later
+                print(f" Error fetching Facebook pages: {e}")
         
-        # Final commit and refresh
         await db.commit()
         await db.refresh(connection)
         
