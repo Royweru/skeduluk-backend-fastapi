@@ -3,12 +3,12 @@
 Instagram analytics fetcher via Facebook Graph API.
 """
 
-from .base_analytics import BaseAnalyticsFetcher
+from .base_analytics import BasePlatformService
 import httpx
 from typing import Dict, Any, Optional
 
 
-class InstagramAnalyticsFetcher(BaseAnalyticsFetcher):
+class InstagramAnalyticsFetcher(BasePlatformService):
     """Instagram analytics implementation"""
     
     PLATFORM_NAME = "INSTAGRAM"

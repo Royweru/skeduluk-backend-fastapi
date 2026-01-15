@@ -1,10 +1,10 @@
 # app/services/analytics/facebook_analytics.py
 
-from .base_analytics import BaseAnalyticsFetcher
+from .base_analytics import BasePlatformService
 import httpx
 from typing import Dict, Any, Optional
 
-class FacebookAnalyticsFetcher(BaseAnalyticsFetcher):
+class FacebookAnalyticsFetcher(BasePlatformService):
     """Facebook analytics implementation"""
     
     PLATFORM_NAME = "FACEBOOK"

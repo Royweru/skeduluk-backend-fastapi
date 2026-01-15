@@ -3,12 +3,12 @@
 LinkedIn analytics fetcher.
 """
 
-from .base_analytics import BaseAnalyticsFetcher
+from .base_analytics import BasePlatformService
 import httpx
 from typing import Dict, Any
 
 
-class LinkedInAnalyticsFetcher(BaseAnalyticsFetcher):
+class LinkedInAnalyticsFetcher(BasePlatformService):
     """LinkedIn analytics implementation"""
     
     PLATFORM_NAME = "LINKEDIN"

@@ -4,12 +4,12 @@ YouTube analytics fetcher using YouTube Analytics API.
 """
 
 from typing import Dict, Any
-from .base_analytics import BaseAnalyticsFetcher
+from .base_analytics import BasePlatformService
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 
 
-class YouTubeAnalyticsFetcher(BaseAnalyticsFetcher):
+class YouTubeAnalyticsFetcher(BasePlatformService):
     """YouTube analytics implementation"""
     
     PLATFORM_NAME = "YOUTUBE"

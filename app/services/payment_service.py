@@ -15,8 +15,8 @@ class PaymentService:
     async def initiate_payment(
         user_id: int,
         plan: str,
-        payment_method: str,
-        db: AsyncSession
+        db: AsyncSession,
+        payment_method: str='paystack',
     ) -> Dict[str, Any]:
         """Initiate payment for a subscription plan"""
         

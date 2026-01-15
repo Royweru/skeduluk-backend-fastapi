@@ -19,8 +19,8 @@ async def initiate_payment(
     result = await PaymentService.initiate_payment(
         current_user.id,
         request.plan,
-        request.payment_method,
-        db
+        db,
+        request.payment_method
     )
     
     if not result["success"]:

@@ -3,12 +3,12 @@
 TikTok analytics fetcher using TikTok API v2.
 """
 
-from .base_analytics import BaseAnalyticsFetcher
+from .base_analytics import BasePlatformService
 import httpx
 from typing import Dict, Any
 
 
-class TikTokAnalyticsFetcher(BaseAnalyticsFetcher):
+class TikTokAnalyticsFetcher(BasePlatformService):
     """TikTok analytics implementation"""
     
     PLATFORM_NAME = "TIKTOK"

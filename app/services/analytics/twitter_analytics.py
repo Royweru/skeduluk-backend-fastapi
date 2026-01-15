@@ -1,10 +1,10 @@
 # app/services/analytics/twitter_analytics.py
-from .base_analytics import BaseAnalyticsFetcher
+from .base_analytics import BasePlatformService
 import httpx
 from typing import Dict, Any
 
 
-class TwitterAnalyticsFetcher(BaseAnalyticsFetcher):
+class TwitterAnalyticsFetcher(BasePlatformService):
     """Twitter/X analytics implementation"""
     
     PLATFORM_NAME = "TWITTER"
