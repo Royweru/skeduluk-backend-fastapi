@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import json
 from .. import models, schemas
+from app.crud.user_crud import UserCRUD
 from app.utils.datetime_utils import make_timezone_naive, utcnow_naive
 class SubscriptionCRUD:
     @staticmethod
@@ -66,6 +67,13 @@ class SubscriptionCRUD:
         
         return db_subscription
 
+    @staticmethod
+    async def get_by_payment_reference(db: AsyncSession, reference: str) -> Optional[models.Subscription]:
+        """Check if a subscription already exists for this payment reference"""
+        result = await db.execute(
+            select(models.Subscription).where(models.Subscription.payment_reference == reference)
+        )
+        return result.scalar_one_or_none()
 
 
 

@@ -1,5 +1,5 @@
 # app/routers/payments.py
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import auth, schemas, models
@@ -61,3 +61,52 @@ async def get_subscriptions(
         return []
     
     return [subscription]
+
+@router.get("/verify/paystack/{reference}")
+async def verify_paystack_payment(
+    reference: str,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Verify Paystack payment via Reference"""
+    result = await PaymentService.verify_paystack_payment(reference, db)
+    
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    
+    return {
+        "message": "Payment verified successfully",
+        "subscription_id": result["subscription_id"],
+        "plan": result["plan"]
+    }
+    
+@router.post("/webhook/paystack", status_code=status.HTTP_200_OK)
+async def paystack_webhook(
+    request: Request,
+    x_paystack_signature: str = Header(None),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Background listener for Paystack events.
+    Must return 200 OK quickly to prevent Paystack from retrying.
+    """
+    if not x_paystack_signature:
+        # It's okay to return 200 here to avoid log spam, or 400 if you strictly want to reject.
+        # But usually, just ignore it.
+        return {"status": "ignored", "message": "No signature header"}
+
+    # We need the RAW bytes for HMAC verification
+    payload_bytes = await request.body()
+    
+    success = await PaymentService.process_webhook_event(
+        x_paystack_signature,
+        payload_bytes,
+        db
+    )
+
+    if not success:
+        # If signature failed, we technically return 200 to stop Paystack from
+        # retrying a malicious request, but we log it internally.
+        # Alternatively, return 400 to signal error.
+        return {"status": "error", "message": "Signature verification failed"}
+
+    return {"status": "success"}
