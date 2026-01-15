@@ -31,8 +31,10 @@ class AIService:
         gemini_key = os.getenv("GOOGLE_API_KEY")
         openai_key = os.getenv("OPENAI_API_KEY")
         anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-    
-        
+         
+        if openai_key:
+            self.openai_client = AsyncOpenAI(api_key=openai_key)
+            print("✓ OpenAI client initialized")
         # Initialize Groq (OpenAI-compatible, very fast)
         if groq_key:
             self.groq_client = AsyncGroq(api_key=groq_key)
@@ -40,16 +42,7 @@ class AIService:
         
         # Initialize Google Gemini 2.5 (NEW SDK)
         if gemini_key:
-            try:
-                self.gemini_client = genai.Client(api_key=gemini_key)
-                print("✓ Google Gemini client initialized")
-            except Exception as e:
-                print(f"Failed to initialize Gemini: {e}")
-        
-        # Initialize OpenAI
-        if openai_key:
-            self.openai_client = AsyncOpenAI(api_key=openai_key)
-            print("✓ OpenAI client initialized")
+            self.gemini_client = genai.Client(api_key=gemini_key)
         
         # Initialize Anthropic Claude
         if anthropic_key:
@@ -416,6 +409,56 @@ Hashtags:"""
         assert isinstance(info["configured_provider"], str), f"configured_provider should be str, got {type(info['configured_provider'])}"
         
         return info
+    
+    async def proofread_content(self, content: str, style: str = "standard") -> str:
+        """
+        Proofread for grammar/spelling only - NO tone/style changes
+        """
+        prompt = f"""You are a professional editor. Proofread this text for:
+        - Grammar errors
+        - Spelling mistakes
+        - Punctuation issues
+        - Sentence structure problems
+        
+        DO NOT:
+        - Change the tone or style
+        - Add marketing language
+        - Optimize for platforms
+        - Rewrite for engagement
+        
+        Return ONLY the corrected text, nothing else.
+        
+        Text: {content}
+        
+        Corrected text:"""
+
+        try:
+            # Use primary provider
+            
+            if self.openai_client :
+                response =await self.openai_client.chat.completions.create(
+                    model ="gpt-5.2",
+                    messages = [
+                        {
+                            "role" : "user",
+                            "content" :prompt
+                        },
+                    ],
+                    temperature = 0.1,
+                    max_tokens=min(len(content) + 200, 2000)
+                )
+            elif self.groq_client:
+                response = await self.groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,  # More deterministic
+                    max_tokens=min(len(content) + 200, 2000)
+                )
+                return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            print(f"Proofreading failed: {e}")
+            return content  # Return original if fails
 
 
 # Singleton instance

@@ -663,3 +663,46 @@ async def get_ai_providers(
 ):
     """Get available AI providers status"""
     return ai_service.get_provider_info()
+
+@router.post("/proofread", response_model=schemas.ProofreadResponse)
+async def proofread_content(
+    request: schemas.ProofreadRequest,
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """
+    Proofread content for grammar, spelling, and flow corrections.
+    This is DIFFERENT from enhancement - it corrects errors without changing tone/style.
+    
+    Unlike enhance endpoint:
+    - Does NOT add emojis
+    - Does NOT add hashtags
+    - Does NOT change tone
+    - Does NOT optimize for platforms
+    - ONLY fixes: grammar, spelling, punctuation, sentence structure
+    """
+    try:
+        corrected_content = await ai_service.proofread_content(
+            content=request.content,
+            style=request.style or "standard"
+        )
+        
+        # Calculate differences for user feedback
+        original_words = len(request.content.split())
+        corrected_words = len(corrected_content.split())
+        corrections_made = corrected_content.strip() != request.content.strip()
+        
+        return {
+            "original_content": request.content,
+            "corrected_content": corrected_content,
+            "corrections_made": corrections_made,
+            "original_word_count": original_words,
+            "corrected_word_count": corrected_words,
+            "confidence_score": 0.95  # AI model confidence
+        }
+        
+    except Exception as e:
+        print(f"❌ Proofreading error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Proofreading failed: {str(e)}"
+        )

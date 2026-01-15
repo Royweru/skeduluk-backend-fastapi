@@ -462,3 +462,19 @@ class FetchAnalyticsResponse(BaseModel):
     post_id: int
     platforms: Dict[str, Any]
     fetched_at: str
+    
+    
+
+class ProofreadRequest(BaseModel):
+    """Request for proofreading content"""
+    content: str
+    style: Optional[str] = "standard"  # standard, formal, casual
+    
+class ProofreadResponse(BaseModel):
+    """Response from proofreading"""
+    original_content: str
+    corrected_content: str
+    corrections_made: bool
+    original_word_count: int
+    corrected_word_count: int
+    confidence_score: float
