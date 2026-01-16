@@ -17,7 +17,7 @@ async def initiate_payment(
 ):
     """Initiate payment for a subscription plan"""
     result = await PaymentService.initiate_payment(
-        current_user.id,
+        current_user,
         request.plan,
         db,
         request.payment_method

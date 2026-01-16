@@ -14,7 +14,7 @@ from app.crud.subscription_crud import SubscriptionCRUD
 class PaymentService:
     @staticmethod
     async def initiate_payment(
-        user_id: int,
+        user: models.User,
         plan: str,
         db: AsyncSession,
         payment_method: str='paystack',
@@ -45,13 +45,13 @@ class PaymentService:
             # Use KES pricing for Paystack (Best for M-PESA)
             price_info = plan_prices_kes[plan_key]
             return await PaymentService._initiate_paystack_payment(
-                user_id, plan, price_info
+                user,plan, price_info
             )
             
         elif payment_method.lower() == "paypal":
             price_info = plan_prices_usd[plan_key]
             return await PaymentService._initiate_paypal_payment(
-                user_id, plan,price_info
+               user,plan,price_info
             )
         else:
             return {"success": False, "error": "Unsupported payment method"}
@@ -61,15 +61,14 @@ class PaymentService:
     # ==========================================
     @staticmethod
     async def _initiate_paystack_payment(
-        user_id: int,
+        user: models.User,
         plan: str,
         price_info: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Initiate payment with Paystack"""
         
         # 1. Generate a unique reference
-        tx_ref = f"sub-{user_id}-{plan}-{uuid.uuid4().hex[:8]}"
-        current_user = await get_current_active_user()
+        tx_ref = f"sub-{user.id}-{plan}-{uuid.uuid4().hex[:8]}"
         # 2. Prepare payload
         # Paystack expects amount in "kobo" (lowest currency unit). 
         # So 100 KES = 10000 sent to API.
@@ -77,13 +76,13 @@ class PaymentService:
         callback_url = f"{settings.FRONTEND_URL}/payment/verify?provider=paystack"
 
         payload = {
-            "email": f"{current_user.email}", 
+            "email": f"{user.email}", 
             "amount": amount_in_kobo,
             "currency": price_info["currency"],
             "reference": tx_ref,
             "callback_url": callback_url,
             "metadata": {
-                "user_id": user_id,
+                "user_id": user.id,
                 "plan": plan,
                 "cancel_action": f"{settings.FRONTEND_URL}/pricing"
             }
@@ -189,7 +188,7 @@ class PaymentService:
     
     @staticmethod
     async def _initiate_paypal_payment(
-        user_id: int,
+        user: models.User,
         plan: str,
         price_info: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -200,7 +199,7 @@ class PaymentService:
         return {
             "success": True,
             "payment_link": f"https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=EXAMPLE",
-            "reference": f"sub-{user_id}-{plan}-{uuid.uuid4()}"
+            "reference": f"sub-{user.id}-{plan}-{uuid.uuid4()}"
         }
     
     
