@@ -1,10 +1,7 @@
 # app/routers/auth.py
 from datetime import timedelta
-from urllib.parse import quote  
-from typing import Annotated,Dict,List,Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import select
@@ -13,7 +10,7 @@ from .. import models, auth
 from ..utils.security import verify_password , get_password_hash
 from ..database import get_async_db
 from ..services.auth_service import AuthService
-from ..services.oauth_service import OAuthService
+
 from ..config import settings
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
