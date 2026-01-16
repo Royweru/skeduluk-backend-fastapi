@@ -224,7 +224,7 @@ class PostTimeResponse(BaseModel):
 # Payment schemas
 class PaymentInitiateRequest(BaseModel):
     plan: str
-    payment_method: str
+    payment_method: Optional[str] = "paystack"
 
 class PaymentInitiateResponse(BaseModel):
     payment_link: str

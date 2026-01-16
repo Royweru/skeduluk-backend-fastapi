@@ -451,9 +451,7 @@ class OAuthService:
             
             if config.get("uses_pkce", False) and code_verifier:
                 token_params["code_verifier"] = code_verifier
-            
-            # ⚠️ CRITICAL FIX: Add User-Agent to bypass TikTok 404 TLB/WAF blocking
-            # The "SkedulukApp/1.0" string tells TikTok we are a real app, not a scraper script.
+    
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Accept": "application/json",
@@ -476,8 +474,8 @@ class OAuthService:
                 )
                 
                 if token_response.status_code != 200:
-                    print(f"❌ Token exchange failed. Status: {token_response.status_code}")
-                    print(f"❌ Response body: {token_response.text}")
+                    print(f" Token exchange failed. Status: {token_response.status_code}")
+                    print(f" Response body: {token_response.text}")
                     return {
                         "success": False,
                         "error": f"Token exchange failed: {token_response.status_code} {token_response.text[:200]}"
