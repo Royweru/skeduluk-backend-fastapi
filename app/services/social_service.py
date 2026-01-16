@@ -9,13 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
 from ..models import SocialConnection
-from .platforms import (
-    TwitterService,
-    FacebookService,
-    InstagramService,
-    LinkedInService,
-    YouTubeService
-)
+from .platforms import get_platform_service
 from .oauth_service import OAuthService
 
 
@@ -24,15 +18,7 @@ class SocialService:
     Main orchestrator for social media posting.
     Routes requests to platform-specific services.
     """
-    
-    # Platform service mapping
-    PLATFORM_SERVICES = {
-        "TWITTER": TwitterService,
-        "FACEBOOK": FacebookService,
-        "INSTAGRAM": InstagramService,
-        "LINKEDIN": LinkedInService,
-        "YOUTUBE": YouTubeService
-    }
+
     
     #  NEW: Platforms that use OAuth 1.0a (no token refresh)
     OAUTH_1_0A_PLATFORMS = {"TWITTER"}
@@ -111,7 +97,7 @@ class SocialService:
         print(f"{'='*60}")
         
         # Get platform service
-        service_class = cls.PLATFORM_SERVICES.get(platform)
+        service_class = get_platform_service(platform)
         if not service_class:
             return {
                 "success": False,
