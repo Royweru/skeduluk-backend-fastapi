@@ -1,6 +1,7 @@
 # app/services/auth_service.py
-from app.utils.security import verify_password , get_password_hash
+from app.utils.security import verify_password, get_password_hash
 import secrets
+import string
 import base64
 from datetime import datetime, timedelta
 from typing import Optional
@@ -9,10 +10,7 @@ from sqlalchemy import select
 from .. import models
 from .email_service import email_service as EmailService
 
-
 class AuthService:
-    """Single authentication service handling all auth operations"""
-
     @staticmethod
     async def create_user_with_verification(
         db: AsyncSession,
@@ -20,41 +18,80 @@ class AuthService:
         username: str,
         password: str
     ) -> models.User:
-        """Create new user with email verification"""
-
-        # Generate verification token
-        verification_token = base64.urlsafe_b64encode(
-            secrets.token_bytes(32)
-        ).decode()
+        """
+        Creates user and sends verification email via Gmail API.
+        """
+        # Generate Token
+        verification_token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
         verification_expires = datetime.utcnow() + timedelta(hours=24)
-
-        # Set trial period (30 days from now)
-        trial_ends_at = datetime.utcnow() + timedelta(days=30)
-
-        # Create user
+        
+        # Create User (Not Verified yet)
         user = models.User(
             email=email,
             username=username,
-            hashed_password=get_password_hash(password),  # ← Uses your auth.py function
+            hashed_password=get_password_hash(password),
             is_email_verified=False,
             email_verification_token=verification_token,
             email_verification_expires=verification_expires,
-            trial_ends_at=trial_ends_at,
             plan="trial",
-            posts_limit=10,
+            posts_limit=10
         )
 
         db.add(user)
         await db.commit()
         await db.refresh(user)
 
-        # Send verification email (wrapped in try-catch to not block user creation)
+        # TRIGGER EMAIL (Uses Gmail API from email_service.py)
         try:
             await EmailService.send_verification_email(email, verification_token)
         except Exception as e:
-            print(f"Failed to send verification email: {e}")
+            print(f"Failed to send email: {e}")
 
         return user
+
+    @staticmethod
+    async def get_or_create_google_user(
+        db: AsyncSession, 
+        email: str, 
+        username_base: str
+    ) -> models.User:
+        """
+        Logs in existing user OR creates new verified user.
+        SKIPS email verification.
+        """
+        # Check if user exists
+        result = await db.execute(select(models.User).where(models.User.email == email))
+        user = result.scalar_one_or_none()
+        
+        if user:
+            # Trust Google: Verify them if they weren't already
+            if not user.is_email_verified:
+                user.is_email_verified = True
+                await db.commit()
+            return user
+            
+        # Create New User (Auto-Verified)
+        # Generate random password (they use Google to login)
+        alphabet = string.ascii_letters + string.digits + "!@#$%"
+        random_password = ''.join(secrets.choice(alphabet) for i in range(20))
+        
+        # Unique username
+        base_slug = username_base.lower().replace(' ', '')[:10]
+        unique_username = f"{base_slug}_{secrets.token_hex(3)}"
+        
+        new_user = models.User(
+            email=email,
+            username=unique_username,
+            hashed_password=get_password_hash(random_password),
+            is_email_verified=True,  # ✅ Auto-verified by Google
+            plan="trial",
+            posts_limit=10
+        )
+        
+        db.add(new_user)
+        await db.commit()
+        await db.refresh(new_user)
+        return new_user
 
     @staticmethod
     async def verify_email(db: AsyncSession, token: str) -> bool:

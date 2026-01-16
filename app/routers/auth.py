@@ -3,6 +3,8 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy import select
 
@@ -43,7 +45,8 @@ class ResetPassword(BaseModel):
     token: str
     password: str
 
-
+class GoogleLoginRequest(BaseModel):
+    token: str
 @router.post("/register")
 async def register(
     user_data: UserRegister,
@@ -69,15 +72,42 @@ async def register(
         db, user_data.email, user_data.username, user_data.password
     )
     
-    return {
-        "id": user.id,
-        "email": user.email,
-        "username": user.username,
-        "is_email_verified": user.is_email_verified,
-        "message": "Registration successful! Please check your email to verify your account."
-    }
+    return {"message": "Registration successful! Please check your email."}
 
 
+
+# ---  GOOGLE LOGIN ---
+@router.post("/google")
+async def google_login(
+    login_data: GoogleLoginRequest,
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        # Verify Token
+        id_info = id_token.verify_oauth2_token(
+            login_data.token, 
+            google_requests.Request(), 
+            settings.GOOGLE_CLIENT_ID
+        )
+        
+        # Get or Create User
+        user = await AuthService.get_or_create_google_user(
+            db, id_info['email'], id_info.get('name', 'user')
+        )
+        
+        # Create App Token
+        access_token = auth.create_access_token(
+            data={"sub": user.username}, 
+            expires_delta=timedelta(hours=settings.ACCESS_TOKEN_EXPIRE_HOURS)
+        )
+        
+        return {
+            "access_token": access_token, 
+            "token_type": "bearer",
+            "user": {"id": user.id, "username": user.username, "email": user.email}
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Google Auth Failed: {str(e)}")
 @router.post("/verify-email")
 async def verify_email(
     data: VerifyEmail,
@@ -137,6 +167,38 @@ async def login(
     
     return {"access_token": access_token, "token_type": "bearer"}
 
+
+# --- 2. GOOGLE LOGIN ---
+@router.post("/google")
+async def google_login(
+    login_data: GoogleLoginRequest,
+    db: AsyncSession = Depends(get_async_db)
+):
+    try:
+        # Verify Token
+        id_info = id_token.verify_oauth2_token(
+            login_data.token, 
+            google_requests.Request(), 
+            settings.GOOGLE_CLIENT_ID
+        )
+        
+        # Get or Create User
+        user = await AuthService.get_or_create_google_user(
+            db, id_info['email'], id_info.get('name', 'user')
+        )
+        
+        # Create App Token
+        access_token = auth.create_access_token(
+            data={"sub": user.username}, 
+            expires_delta=timedelta(hours=settings.ACCESS_TOKEN_EXPIRE_HOURS)
+        )
+        
+        return {
+            "access_token": access_token, 
+            "token_type": "bearer",
+            "user": {"id": user.id, "username": user.username, "email": user.email}
+        }
+    except Exception as e:
 @router.post("/forgot-password")
 async def forgot_password(
     data: ForgotPassword,
@@ -163,30 +225,5 @@ async def reset_password(
     
     return {"message": "Password reset successfully!"}
 
-# Add to your test endpoint
-@router.post("/test-email")
-async def test_email(
-    email: str = Body(default='weruroy347@gmail.com', embed=True)  
-):
-    """Test endpoint to verify email configuration"""
-    from ..services.email_service import email_service
-    
-    print(f"📧 Testing email to: {email}")
-    print(f"SMTP Server: {email_service.smtp_server}:{email_service.smtp_port}")
-    print(f"SMTP Username configured: {bool(email_service.smtp_username)}")
-    print(f"SMTP Password configured: {bool(email_service.smtp_password)}")
-    
-    result = await email_service.send_verification_email(email, "test-token-123")
-    
-    return {
-        "success": result,
-        "message": f"Email {'sent successfully' if result else 'failed to send'}",
-        "email": email,
-        "config": {
-            "smtp_server": email_service.smtp_server,
-            "smtp_port": email_service.smtp_port,
-            "has_credentials": bool(email_service.smtp_username and email_service.smtp_password)
-        }
-    }
 
 

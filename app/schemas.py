@@ -478,3 +478,5 @@ class ProofreadResponse(BaseModel):
     original_word_count: int
     corrected_word_count: int
     confidence_score: float
+    
+
