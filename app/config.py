@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     FLUTTERWAVE_PUBLIC_KEY: str = ""
     FLUTTERWAVE_ENCRYPTION_KEY: str = ""
     
+    #payment - Paystack (optional)
+    PAYSTACK_PUBLIC_KEY:str = ""
+    PAYSTACK_SECRET_KEY:str = ""
+    
+    
     # SMTP/Email Configuration (Optional - can add later)
     SMTP_SERVER: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
