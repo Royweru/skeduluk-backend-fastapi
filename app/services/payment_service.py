@@ -70,8 +70,6 @@ class PaymentService:
         # 1. Generate a unique reference
         tx_ref = f"sub-{user.id}-{plan}-{uuid.uuid4().hex[:8]}"
         # 2. Prepare payload
-        # Paystack expects amount in "kobo" (lowest currency unit). 
-        # So 100 KES = 10000 sent to API.
         amount_in_kobo = int(price_info["amount"] * 100)
         callback_url = f"{settings.FRONTEND_URL}/payment/verify?provider=paystack"
 
@@ -150,7 +148,10 @@ class PaymentService:
                 user_id = metadata.get("user_id")
                 plan = metadata.get("plan")
                 
-                # Fallback extraction if metadata is missing (parsing reference)
+                if user_id :
+                    user_id = int(metadata.get("user_id"))
+              
+              
                 if not user_id or not plan:
                     parts = data["reference"].split('-')
                     if len(parts) >= 3:
