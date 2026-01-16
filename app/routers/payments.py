@@ -31,22 +31,6 @@ async def initiate_payment(
         "reference": result["reference"]
     }
 
-@router.get("/verify/flutterwave/{transaction_id}")
-async def verify_flutterwave_payment(
-    transaction_id: str,
-    db: AsyncSession = Depends(get_async_db)
-):
-    """Verify Flutterwave payment"""
-    result = await PaymentService.verify_flutterwave_payment(transaction_id, db)
-    
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result["error"])
-    
-    return {
-        "message": "Payment verified successfully",
-        "subscription_id": result["subscription_id"],
-        "plan": result["plan"]
-    }
 
 @router.get("/subscriptions", response_model=list[schemas.SubscriptionResponse])
 async def get_subscriptions(

@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 
+from ..auth import get_current_active_user
 from ..config import settings
 from .. import crud, models, schemas
 from app.crud.subscription_crud import SubscriptionCRUD
@@ -47,12 +48,6 @@ class PaymentService:
                 user_id, plan, price_info
             )
             
-        elif payment_method.lower() == "flutterwave":
-            price_info = plan_prices_usd[plan_key]
-            return await PaymentService._initiate_flutterwave_payment(
-                user_id, plan, price_info
-            )
-            
         elif payment_method.lower() == "paypal":
             price_info = plan_prices_usd[plan_key]
             return await PaymentService._initiate_paypal_payment(
@@ -74,18 +69,15 @@ class PaymentService:
         
         # 1. Generate a unique reference
         tx_ref = f"sub-{user_id}-{plan}-{uuid.uuid4().hex[:8]}"
-        
+        current_user = await get_current_active_user()
         # 2. Prepare payload
         # Paystack expects amount in "kobo" (lowest currency unit). 
         # So 100 KES = 10000 sent to API.
         amount_in_kobo = int(price_info["amount"] * 100)
-        
-        # This URL is where Paystack sends the user AFTER payment
-        # Point this to your NEXT.JS Frontend verification page
         callback_url = f"{settings.FRONTEND_URL}/payment/verify?provider=paystack"
 
         payload = {
-            "email": f"user{user_id}@example.com", # TODO: Get real email from User DB
+            "email": f"{current_user.email}", 
             "amount": amount_in_kobo,
             "currency": price_info["currency"],
             "reference": tx_ref,
@@ -193,62 +185,7 @@ class PaymentService:
             return {"success": False, "error": "Payment was not successful"}
             
     
-    @staticmethod
-    async def _initiate_flutterwave_payment(
-        user_id: int,
-        plan: str,
-        price_info: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Initiate payment with Flutterwave"""
-        # Get user details
-        # In a real implementation, you'd fetch this from the database
-        
-        # Generate transaction reference
-        tx_ref = f"sub-{user_id}-{plan}-{uuid.uuid4()}"
-        
-        # Prepare payment data
-        payment_data = {
-            "tx_ref": tx_ref,
-            "amount": price_info["amount"],
-            "currency": price_info["currency"],
-            "redirect_url": f"{settings.ALLOWED_HOSTS[0]}/payment/verify/flutterwave",
-            "payment_options": "card, mpesa",
-            "customer": {
-                "email": f"user{user_id}@example.com",  # Replace with actual email
-                "name": f"User {user_id}"  # Replace with actual name
-            },
-            "customizations": {
-                "title": f"{plan.capitalize()} Subscription",
-                "description": f"Monthly {plan.capitalize()} subscription"
-            }
-        }
-        
-        # Initialize payment with Flutterwave
-        headers = {
-            "Authorization": f"Bearer {settings.FLUTTERWAVE_SECRET_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://api.flutterwave.com/v3/payments",
-                headers=headers,
-                json=payment_data
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                if result["status"] == "success":
-                    return {
-                        "success": True,
-                        "payment_link": result["data"]["link"],
-                        "reference": tx_ref
-                    }
-            
-            return {
-                "success": False,
-                "error": f"Flutterwave payment initialization failed: {response.text}"
-            }
+    
     
     @staticmethod
     async def _initiate_paypal_payment(
@@ -266,63 +203,7 @@ class PaymentService:
             "reference": f"sub-{user_id}-{plan}-{uuid.uuid4()}"
         }
     
-    @staticmethod
-    async def verify_flutterwave_payment(
-        transaction_id: str,
-        db: AsyncSession
-    ) -> Dict[str, Any]:
-        """Verify Flutterwave payment and create subscription"""
-        headers = {
-            "Authorization": f"Bearer {settings.FLUTTERWAVE_SECRET_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"https://api.flutterwave.com/v3/transactions/{transaction_id}/verify",
-                headers=headers
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                
-                if (
-                    result["status"] == "success" and
-                    result["data"]["status"] == "successful" and
-                    result["data"]["currency"] == "USD"
-                ):
-                    # Extract plan from transaction reference
-                    tx_ref = result["data"]["tx_ref"]
-                    parts = tx_ref.split('-')
-                    
-                    if len(parts) >= 3:
-                        user_id = int(parts[1])
-                        plan = parts[2]
-                        
-                        # Create subscription
-                        subscription = await SubscriptionCRUD.create_subscription(
-                            db,
-                            schemas.SubscriptionCreate(
-                                plan=plan,
-                                amount=float(result["data"]["amount"]),
-                                currency=result["data"]["currency"],
-                                payment_method="flutterwave",
-                                payment_reference=transaction_id
-                            ),
-                            user_id
-                        )
-                        
-                        return {
-                            "success": True,
-                            "subscription_id": subscription.id,
-                            "plan": plan,
-                            "user_id": user_id
-                        }
-            
-            return {
-                "success": False,
-                "error": "Payment verification failed"
-            }
+    
     @staticmethod
     async def process_webhook_event(
         signature: str,
