@@ -167,38 +167,6 @@ async def login(
     
     return {"access_token": access_token, "token_type": "bearer"}
 
-
-# --- 2. GOOGLE LOGIN ---
-@router.post("/google")
-async def google_login(
-    login_data: GoogleLoginRequest,
-    db: AsyncSession = Depends(get_async_db)
-):
-    try:
-        # Verify Token
-        id_info = id_token.verify_oauth2_token(
-            login_data.token, 
-            google_requests.Request(), 
-            settings.GOOGLE_CLIENT_ID
-        )
-        
-        # Get or Create User
-        user = await AuthService.get_or_create_google_user(
-            db, id_info['email'], id_info.get('name', 'user')
-        )
-        
-        # Create App Token
-        access_token = auth.create_access_token(
-            data={"sub": user.username}, 
-            expires_delta=timedelta(hours=settings.ACCESS_TOKEN_EXPIRE_HOURS)
-        )
-        
-        return {
-            "access_token": access_token, 
-            "token_type": "bearer",
-            "user": {"id": user.id, "username": user.username, "email": user.email}
-        }
-    except Exception as e:
 @router.post("/forgot-password")
 async def forgot_password(
     data: ForgotPassword,
