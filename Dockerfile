@@ -1,18 +1,18 @@
-# Use a lightweight Python base image
+
 FROM python:3.10-slim
 
-# 1. Install system tools: Supervisor and Timezone Data
+
 RUN apt-get update && apt-get install -y \
     supervisor \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Set the Timezone to Nairobi (matches your requirement)
+
 ENV TZ=Africa/Nairobi
 
 WORKDIR /app
 
-# 3. Install Python dependencies
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
