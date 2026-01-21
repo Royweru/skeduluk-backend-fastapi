@@ -1,26 +1,31 @@
 # app/schemas.py
 import json
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator,Field
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 # User schemas
+
+
 class UserBase(BaseModel):
     email: EmailStr
     username: str
 
+
 class UserCreate(UserBase):
     password: str
-    
+
     @field_validator('password')
     def validate_password(cls, v):
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
         return v
 
+
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     username: Optional[str] = None
+
 
 class UserResponse(UserBase):
     id: int
@@ -30,40 +35,46 @@ class UserResponse(UserBase):
     posts_limit: int
     is_active: bool
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
 # Authentication schemas
+
+
 class Token(BaseModel):
     access_token: str
     token_type: str
+
 
 class TokenData(BaseModel):
     username: Optional[str] = None
 
 # Social Connection schemas
+
+
 class SocialConnectionBase(BaseModel):
     platform: str
     platform_user_id: str
     username: str
 
+
 class SocialConnectionResponse(SocialConnectionBase):
     id: int
     is_active: bool
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
 
-
-#Post schemas
+# Post schemas
 class PostBase(BaseModel):
     original_content: str
     platforms: List[str]
     scheduled_for: Optional[datetime] = None
- 
+
+
 class PostUpdate(BaseModel):
     original_content: Optional[str] = None
     platforms: Optional[List[str]] = None
@@ -71,12 +82,15 @@ class PostUpdate(BaseModel):
     enhanced_content: Optional[Dict[str, str]] = None
     image_urls: Optional[List[str]] = None
     video_urls: Optional[List[str]] = None  # Added video support
-class PostCreate(PostBase) :
+
+
+class PostCreate(PostBase):
     enhanced_content: Optional[Dict[str, str]] = None
     platform_specific_content: Optional[Dict[str, str]] = None
     image_urls: Optional[List[str]] = None
-    video_urls: Optional[List[str]] = None 
-    audio_file_url:Optional[str] 
+    video_urls: Optional[List[str]] = None
+    audio_file_url: Optional[str]
+
 
 class PostResponse(PostBase):
     id: int
@@ -89,7 +103,7 @@ class PostResponse(PostBase):
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
-    
+
     @field_validator('platforms', 'image_urls', 'video_urls', mode='before')
     @classmethod
     def parse_json_list_fields(cls, v):
@@ -101,7 +115,7 @@ class PostResponse(PostBase):
             except json.JSONDecodeError:
                 return []
         return v
-    
+
     @field_validator('enhanced_content', mode='before')
     @classmethod
     def parse_json_dict_fields(cls, v):
@@ -132,23 +146,28 @@ class PostResultBase(BaseModel):
     posted_at: Optional[datetime] = None
     content_used: Optional[str] = None
 
+
 class PostResultResponse(PostResultBase):
     id: int
     post_id: int
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
 # Subscription schemas
+
+
 class SubscriptionBase(BaseModel):
     plan: str
     amount: float
     currency: str = "USD"
     payment_method: str
 
+
 class SubscriptionCreate(SubscriptionBase):
     payment_reference: Optional[str] = None
+
 
 class SubscriptionResponse(SubscriptionBase):
     id: int
@@ -158,19 +177,22 @@ class SubscriptionResponse(SubscriptionBase):
     starts_at: datetime
     ends_at: datetime
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
 
-
 # AI Enhancement schemas
 class ContentEnhancementRequest(BaseModel):
-    content: str = Field(..., min_length=1, max_length=10000, description="Original content to enhance")
-    platforms: List[str] = Field(..., min_items=1, description="List of target platforms")
-    image_count: int = Field(default=0, ge=0, le=10, description="Number of images attached")
-    tone: str = Field(default="engaging", description="Desired tone for the content")
-    
+    content: str = Field(..., min_length=1, max_length=10000,
+                         description="Original content to enhance")
+    platforms: List[str] = Field(..., min_items=1,
+                                 description="List of target platforms")
+    image_count: int = Field(default=0, ge=0, le=10,
+                             description="Number of images attached")
+    tone: str = Field(default="engaging",
+                      description="Desired tone for the content")
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -193,8 +215,9 @@ class ContentEnhancementResponse(BaseModel):
 
 class HashtagsRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
-    count: int = Field(default=5, ge=1, le=20, description="Number of hashtags to generate")
-    
+    count: int = Field(default=5, ge=1, le=20,
+                       description="Number of hashtags to generate")
+
     class Config:
         schema_extra = {
             "example": {
@@ -222,15 +245,20 @@ class PostTimeResponse(BaseModel):
     day: str
     time: str
 # Payment schemas
+
+
 class PaymentInitiateRequest(BaseModel):
     plan: str
     payment_method: Optional[str] = "paystack"
+
 
 class PaymentInitiateResponse(BaseModel):
     payment_link: str
     reference: str
 
 # Calendar schemas
+
+
 class CalendarEvent(BaseModel):
     id: int
     title: str
@@ -247,34 +275,41 @@ class CalendarEvent(BaseModel):
     color: str
     allDay: bool
 
+
 class CalendarEventResponse(BaseModel):
     events: List[CalendarEvent]
     start_date: str
     end_date: str
     total: int
 
+
 class BulkDeleteRequest(BaseModel):
     post_ids: List[int]
+
 
 class BulkRescheduleRequest(BaseModel):
     post_ids: List[int]
     scheduled_for: str  # ISO datetime string
 
+
 class DuplicatePostResponse(BaseModel):
     id: int
     message: str
-    
-    
+
+
 # ============================================================================
 # TEMPLATE SCHEMAS
 # ============================================================================
 class TemplateVariableDefinition(BaseModel):
-    name: str = Field(..., description="Variable name without braces, e.g., 'product_name'")
+    name: str = Field(...,
+                      description="Variable name without braces, e.g., 'product_name'")
     label: str = Field(..., description="Human-readable label")
-    type: str = Field(default="text", description="text, date, number, hashtags, url")
+    type: str = Field(
+        default="text", description="text, date, number, hashtags, url")
     placeholder: str = Field(..., description="Placeholder text")
     required: bool = Field(default=True)
     default_value: Optional[str] = None
+
 
 class TemplateBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
@@ -292,8 +327,10 @@ class TemplateBase(BaseModel):
     color_scheme: str = Field(default="#3B82F6")
     icon: str = Field(default="sparkles")
 
+
 class TemplateCreate(TemplateBase):
     pass
+
 
 class TemplateUpdate(BaseModel):
     name: Optional[str] = None
@@ -303,6 +340,7 @@ class TemplateUpdate(BaseModel):
     platform_variations: Optional[Dict[str, str]] = None
     is_favorite: Optional[bool] = None
     folder_id: Optional[int] = None
+
 
 class TemplateResponse(TemplateBase):
     id: int
@@ -317,23 +355,27 @@ class TemplateResponse(TemplateBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     last_used_at: Optional[datetime] = None
-    
+
     model_config = ConfigDict(from_attributes=True)
+
 
 class TemplateUseRequest(BaseModel):
     template_id: int
-    variable_values: Optional[Dict[str, str]] = Field(default_factory=dict, description="Key-value pairs for variables")
+    variable_values: Optional[Dict[str, str]] = Field(
+        default_factory=dict, description="Key-value pairs for variables")
     platforms: List[str] = Field(..., min_items=1)
     scheduled_for: Optional[datetime] = None
     use_ai_enhancement: bool = Field(default=False)
     images: Optional[List[str]] = None
     videos: Optional[List[str]] = None
 
+
 class TemplateFolderCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
     color: str = Field(default="#6366F1")
     icon: str = Field(default="folder")
+
 
 class TemplateFolderResponse(BaseModel):
     id: int
@@ -344,8 +386,9 @@ class TemplateFolderResponse(BaseModel):
     icon: str
     template_count: Optional[int] = 0
     created_at: datetime
-    
+
     model_config = ConfigDict(from_attributes=True)
+
 
 class TemplateSearchRequest(BaseModel):
     query: Optional[str] = None
@@ -356,16 +399,19 @@ class TemplateSearchRequest(BaseModel):
     folder_id: Optional[int] = None
     include_system: bool = Field(default=True)
     include_community: bool = Field(default=False)
-    sort_by: str = Field(default="created_at", description="created_at, usage_count, success_rate, name")
+    sort_by: str = Field(
+        default="created_at", description="created_at, usage_count, success_rate, name")
     sort_order: str = Field(default="desc", description="asc or desc")
     limit: int = Field(default=50, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
+
 
 class TemplateSearchResponse(BaseModel):
     templates: List[TemplateResponse]
     total: int
     limit: int
     offset: int
+
 
 class TemplateAnalyticsResponse(BaseModel):
     total_uses: int
@@ -374,8 +420,8 @@ class TemplateAnalyticsResponse(BaseModel):
     platform_breakdown: Dict[str, int]
     recent_posts: List[Dict[str, Any]]
     engagement_trend: List[Dict[str, Any]]
-    
-    
+
+
 # Add these to your existing app/schemas.py file
 
 # ==================== ANALYTICS SCHEMAS ====================
@@ -399,7 +445,7 @@ class PostAnalyticsResponse(PostAnalyticsBase):
     post_id: int
     fetched_at: datetime
     error: Optional[str] = None
-    
+
     class Config:
         from_attributes = True
 
@@ -462,14 +508,14 @@ class FetchAnalyticsResponse(BaseModel):
     post_id: int
     platforms: Dict[str, Any]
     fetched_at: str
-    
-    
+
 
 class ProofreadRequest(BaseModel):
     """Request for proofreading content"""
     content: str
     style: Optional[str] = "standard"  # standard, formal, casual
-    
+
+
 class ProofreadResponse(BaseModel):
     """Response from proofreading"""
     original_content: str
@@ -484,7 +530,8 @@ class ProofreadResponse(BaseModel):
 
 class AISuggestionRequest(BaseModel):
     """Request for AI engagement suggestions"""
-    days: int = Field(default=30, ge=7, le=365, description="Days of analytics to analyze")
+    days: int = Field(default=30, ge=7, le=365,
+                      description="Days of analytics to analyze")
 
 
 class AISuggestion(BaseModel):
@@ -502,3 +549,22 @@ class AISuggestionsResponse(BaseModel):
     analyzed_posts: int
     best_performing_platform: Optional[str] = None
     generated_at: str
+
+
+# ==================== TRANSCRIPTION SCHEMAS ====================
+
+class TranscribeRequest(BaseModel):
+    """Request for audio transcription (optional, for URL-based transcription)"""
+    audio_url: Optional[str] = None
+    language: Optional[str] = Field(
+        None, description="ISO-639-1 language code (e.g., 'en', 'es')")
+    prompt: Optional[str] = Field(
+        None, description="Optional text to guide transcription style")
+
+
+class TranscribeResponse(BaseModel):
+    """Response from audio transcription"""
+    transcription: str
+    language: Optional[str] = None
+    duration: Optional[float] = None
+    success: bool = True
