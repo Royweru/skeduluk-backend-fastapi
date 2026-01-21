@@ -478,5 +478,27 @@ class ProofreadResponse(BaseModel):
     original_word_count: int
     corrected_word_count: int
     confidence_score: float
-    
 
+
+# ==================== AI SUGGESTIONS SCHEMAS ====================
+
+class AISuggestionRequest(BaseModel):
+    """Request for AI engagement suggestions"""
+    days: int = Field(default=30, ge=7, le=365, description="Days of analytics to analyze")
+
+
+class AISuggestion(BaseModel):
+    """Individual AI suggestion"""
+    category: str  # timing, content, hashtags, platform, engagement, growth
+    title: str
+    description: str
+    priority: str = Field(default="medium", description="low, medium, high")
+    action_items: List[str] = []
+
+
+class AISuggestionsResponse(BaseModel):
+    """Response containing AI engagement suggestions"""
+    suggestions: List[AISuggestion]
+    analyzed_posts: int
+    best_performing_platform: Optional[str] = None
+    generated_at: str
