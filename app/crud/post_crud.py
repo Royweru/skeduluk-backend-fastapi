@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import json
 from .. import models, schemas
 from app.utils.datetime_utils import make_timezone_naive, utcnow_naive
+from .user_crud import UserCRUD
 class PostCRUD:
     @staticmethod
     async def get_posts_by_user(

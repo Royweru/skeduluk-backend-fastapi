@@ -185,7 +185,8 @@ class OAuthService:
         cls, platform: str, 
         code: Optional[str], state: Optional[str],
         oauth_token: Optional[str], oauth_verifier: Optional[str],
-        db: AsyncSession, error: Optional[str] = None
+        db: AsyncSession, 
+        error: Optional[str] = None
     ) -> Dict:
         """
         Main entry point for handling OAuth callbacks.

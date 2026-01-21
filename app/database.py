@@ -30,7 +30,6 @@ def get_async_database_url():
 
 # ==================== GLOBAL ENGINE FOR FASTAPI ====================
 
-# Create async engine for FastAPI with improved settings
 engine = create_async_engine(
     get_async_database_url(),
     echo=False,
@@ -57,7 +56,6 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False
 )
 
-# Base class for SQLAlchemy models
 Base = declarative_base()
 
 # ==================== DEPENDENCY FOR FASTAPI ====================

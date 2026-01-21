@@ -103,7 +103,7 @@ class YouTubeService(BasePlatformService):
                             print(f"   ��� Upload progress: {progress}%")
                             last_progress = progress
                 except Exception as chunk_error:
-                    print(f"❌ Upload chunk error: {chunk_error}")
+                    print(f" Upload chunk error: {chunk_error}")
                     return cls.format_error_response(f"Upload failed: {str(chunk_error)}")
             
             video_id = response.get("id")
@@ -121,7 +121,7 @@ class YouTubeService(BasePlatformService):
             )
             
         except Exception as e:
-            print(f"❌ YouTube upload error: {e}")
+            print(f" YouTube upload error: {e}")
             import traceback
             traceback.print_exc()
             

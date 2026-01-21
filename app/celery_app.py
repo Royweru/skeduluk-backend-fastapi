@@ -4,14 +4,14 @@ from celery.schedules import crontab
 import os
 import ssl
 from urllib.parse import urlparse
+from .config import settings
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # Create Celery app
 celery_app = Celery(
     "social_scheduler",
-    broker=REDIS_URL,
-    backend=REDIS_URL,
+    broker=settings.REDIS_URL,
+    backend=settings.REDIS_URL,
 )
 
 # Base Celery configuration
@@ -39,11 +39,11 @@ celery_config = {
 }
 
 # 🔐 FIX: Explicit SSL handling for rediss://
-parsed = urlparse(REDIS_URL)
+parsed = urlparse(settings.REDIS_URL)
 
 if parsed.scheme == "rediss":
     ssl_options = {
-        "ssl_cert_reqs": ssl.CERT_NONE,  # ✅ REQUIRED or NONE if provider doesn't expose certs
+        "ssl_cert_reqs": ssl.CERT_NONE,  
     }
 
     celery_config["broker_use_ssl"] = ssl_options
