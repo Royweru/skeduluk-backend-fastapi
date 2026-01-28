@@ -31,12 +31,24 @@ class UserResponse(UserBase):
     id: int
     plan: str
     trial_ends_at: Optional[datetime] = None
-    posts_used: int = 0  # ✅ Default to 0 if NULL
-    posts_limit: int = 10  # ✅ Default to 10 if NULL
+    posts_used: int = 0
+    posts_limit: int = 10
     is_active: bool = True
-    created_at: Optional[datetime] = None  # ✅ Make optional
-    auth_provider: Optional[str] = "email"  # ✅ New field
-    last_login_method: Optional[str] = None  # ✅ New field
+    created_at: Optional[datetime] = None
+    auth_provider: Optional[str] = "email"
+    last_login_method: Optional[str] = None
+
+    @field_validator('posts_used', mode='before')
+    @classmethod
+    def validate_posts_used(cls, v):
+        """Handle NULL values from database"""
+        return v if v is not None else 0
+
+    @field_validator('posts_limit', mode='before')
+    @classmethod
+    def validate_posts_limit(cls, v):
+        """Handle NULL values from database"""
+        return v if v is not None else 10
 
     class Config:
         from_attributes = True
