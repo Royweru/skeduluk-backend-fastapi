@@ -10,6 +10,7 @@ from sqlalchemy import select
 from .. import models
 from .email_service import email_service as EmailService
 
+
 class AuthService:
     @staticmethod
     async def create_user_with_verification(
@@ -22,9 +23,10 @@ class AuthService:
         Creates user and sends verification email via Gmail API.
         """
         # Generate Token
-        verification_token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
+        verification_token = base64.urlsafe_b64encode(
+            secrets.token_bytes(32)).decode()
         verification_expires = datetime.utcnow() + timedelta(hours=24)
-        
+
         # Create User (Not Verified yet)
         user = models.User(
             email=email,
@@ -34,7 +36,8 @@ class AuthService:
             email_verification_token=verification_token,
             email_verification_expires=verification_expires,
             plan="trial",
-            posts_limit=10
+            posts_used=0,
+            posts_limit=30
         )
 
         db.add(user)
@@ -51,8 +54,8 @@ class AuthService:
 
     @staticmethod
     async def get_or_create_google_user(
-        db: AsyncSession, 
-        email: str, 
+        db: AsyncSession,
+        email: str,
         username_base: str
     ) -> models.User:
         """
@@ -62,23 +65,23 @@ class AuthService:
         # Check if user exists
         result = await db.execute(select(models.User).where(models.User.email == email))
         user = result.scalar_one_or_none()
-        
+
         if user:
             # Trust Google: Verify them if they weren't already
             if not user.is_email_verified:
                 user.is_email_verified = True
                 await db.commit()
             return user
-            
+
         # Create New User (Auto-Verified)
         # Generate random password (they use Google to login)
         alphabet = string.ascii_letters + string.digits + "!@#$%"
         random_password = ''.join(secrets.choice(alphabet) for i in range(20))
-        
+
         # Unique username
         base_slug = username_base.lower().replace(' ', '')[:10]
         unique_username = f"{base_slug}_{secrets.token_hex(3)}"
-        
+
         new_user = models.User(
             email=email,
             username=unique_username,
@@ -87,7 +90,7 @@ class AuthService:
             plan="trial",
             posts_limit=10
         )
-        
+
         db.add(new_user)
         await db.commit()
         await db.refresh(new_user)
@@ -158,24 +161,26 @@ class AuthService:
         password: str
     ) -> Optional[models.User]:
         """Authenticate user by username or email"""
-        
+
         # Try username first
         result = await db.execute(
-            select(models.User).where(models.User.username == username_or_email)
+            select(models.User).where(
+                models.User.username == username_or_email)
         )
         user = result.scalar_one_or_none()
-        
+
         # Try email if username not found
         if not user:
             result = await db.execute(
-                select(models.User).where(models.User.email == username_or_email)
+                select(models.User).where(
+                    models.User.email == username_or_email)
             )
             user = result.scalar_one_or_none()
-        
+
         # Verify password
         if not user or not verify_password(password, user.hashed_password):
             return None
-            
+
         return user
 
     @staticmethod
@@ -260,9 +265,9 @@ class AuthService:
 
     @staticmethod
     async def change_password(
-        db: AsyncSession, 
-        user_id: int, 
-        old_password: str, 
+        db: AsyncSession,
+        user_id: int,
+        old_password: str,
         new_password: str
     ) -> bool:
         """Change user password (requires old password)"""
@@ -302,18 +307,18 @@ class AuthService:
             existing_user = await AuthService.get_user_by_email(db, email)
             if existing_user:
                 raise ValueError("Email already in use")
-            
+
             user.email = email
             user.is_email_verified = False
-            
+
             verification_token = base64.urlsafe_b64encode(
                 secrets.token_bytes(32)
             ).decode()
             verification_expires = datetime.utcnow() + timedelta(hours=24)
-            
+
             user.email_verification_token = verification_token
             user.email_verification_expires = verification_expires
-            
+
             try:
                 await EmailService.send_verification_email(email, verification_token)
             except Exception as e:
