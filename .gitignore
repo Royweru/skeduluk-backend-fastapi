@@ -1,3 +1,8 @@
 venv/
 .env
-python test_redis_connection.py
+test_redis_connection.py
+seed_premium_templates.py
+setup_alembic.py
+token.json
+credentials.json
+service_account.json

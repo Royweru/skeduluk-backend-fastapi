@@ -1,6 +1,7 @@
-# app/services/email_service.py
 import os
 import base64
+import json
+import tempfile
 from typing import Optional
 from jinja2 import Template
 from dotenv import load_dotenv
@@ -15,16 +16,10 @@ from google.oauth2 import service_account
 
 load_dotenv()
 
-# Scopes needed for sending email
 SCOPES = ['https://www.googleapis.com/auth/gmail.send']
 
 
 class EmailService:
-    """
-    Production-Ready Email Service using Google Gmail API.
-    Used for Traditional Sign-up Verification & Password Resets.
-    """
-
     def __init__(self):
         self.service = None
         self.sender_email = os.getenv("GMAIL_SENDER_EMAIL")
@@ -32,60 +27,64 @@ class EmailService:
         self._authenticate()
 
     def _authenticate(self):
-        """Authenticates with Google (Service Account or User Token)"""
+        """
+        Secure Authentication Strategy:
+        1. Production: checks GOOGLE_TOKEN_BASE64 env var (Memory)
+        2. Local: checks token.json file (Disk)
+        """
         creds = None
-        service_account_path = 'service_account.json'
-        token_path = 'token.json'
 
-        try:
-            if os.path.exists(service_account_path):
-                print("🔐 Authenticating via Service Account...")
-                creds = service_account.Credentials.from_service_account_file(
-                    service_account_path, scopes=SCOPES
-                )
-            elif os.path.exists(token_path):
-                print("🔐 Authenticating via User Token...")
-                creds = Credentials.from_authorized_user_file(
-                    token_path, SCOPES)
+        # ---  PRODUCTION (Base64 Env Var) ---
+        encoded_token = os.getenv("GOOGLE_TOKEN_BASE64")
+        if encoded_token:
+            print("Authenticating via Base64 Env Var...")
+            try:
+                # Decode the base64 string back to JSON
+                decoded_json = base64.b64decode(encoded_token).decode('utf-8')
+                token_info = json.loads(decoded_json)
 
-            if creds and creds.expired and creds.refresh_token:
+                # Load credentials directly from the dictionary
+                creds = Credentials.from_authorized_user_info(
+                    token_info, SCOPES)
+            except Exception as e:
+                print(f" Failed to decode GOOGLE_TOKEN_BASE64: {e}")
+
+        # --- STRATEGY 2: LOCAL FILE (Fallback) ---
+        elif os.path.exists('token.json'):
+            print("Authenticating via local token.json...")
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+
+        # --- REFRESH LOGIC ---
+        if creds and creds.expired and creds.refresh_token:
+            try:
                 creds.refresh(Request())
+            except Exception as e:
+                print(f" Token refresh failed: {e}")
+                creds = None
 
-            if creds:
-                self.service = build('gmail', 'v1', credentials=creds)
-                print("✅ Gmail API Service Ready")
-            else:
-                print("⚠️  No Google Credentials found. Emails will fail.")
-
-        except Exception as e:
-            print(f"❌ Gmail Auth Failed: {str(e)}")
+        if creds:
+            self.service = build('gmail', 'v1', credentials=creds)
+            print(" Gmail API Service Ready")
+        else:
+            print(" No valid Google Credentials found. Emails will fail.")
 
     async def send_email(self, to_email: str, subject: str, html_content: str) -> bool:
-        """Low-level send function using Gmail API"""
         if not self.service:
-            print("❌ Service not initialized")
             return False
-
         try:
             message = MIMEMultipart('alternative')
             message['to'] = to_email
             message['from'] = f"{self.from_name} <{self.sender_email}>"
             message['subject'] = subject
             message.attach(MIMEText(html_content, 'html'))
-
             raw_message = base64.urlsafe_b64encode(
                 message.as_bytes()).decode('utf-8')
-
             self.service.users().messages().send(
-                userId="me",
-                body={'raw': raw_message}
-            ).execute()
-
-            print(f"✅ Email sent to {to_email} via Gmail API")
+                userId="me", body={'raw': raw_message}).execute()
+            print(f" Email sent to {to_email}")
             return True
-
         except Exception as e:
-            print(f"❌ Gmail API Send Error: {e}")
+            print(f" Gmail Send Error: {e}")
             return False
 
     async def send_verification_email(self, email: str, verification_token: str) -> bool:
@@ -106,7 +105,7 @@ class EmailService:
 
             return await self.send_email(email, "Verify Your Account", html_content)
         except Exception as e:
-            print(f"❌ Verification Logic Error: {e}")
+            print(f" Verification Logic Error: {e}")
             return False
 
     async def send_password_reset_email(self, email: str, reset_token: str) -> bool:
@@ -125,7 +124,7 @@ class EmailService:
 
             return await self.send_email(email, "Reset Your Password", html_content)
         except Exception as e:
-            print(f"❌ Reset Logic Error: {e}")
+            print(f" Reset Logic Error: {e}")
             return False
 
 
