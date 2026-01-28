@@ -31,10 +31,12 @@ class UserResponse(UserBase):
     id: int
     plan: str
     trial_ends_at: Optional[datetime] = None
-    posts_used: int
-    posts_limit: int
-    is_active: bool
-    created_at: datetime
+    posts_used: int = 0  # ✅ Default to 0 if NULL
+    posts_limit: int = 10  # ✅ Default to 10 if NULL
+    is_active: bool = True
+    created_at: Optional[datetime] = None  # ✅ Make optional
+    auth_provider: Optional[str] = "email"  # ✅ New field
+    last_login_method: Optional[str] = None  # ✅ New field
 
     class Config:
         from_attributes = True
