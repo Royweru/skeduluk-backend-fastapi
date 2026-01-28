@@ -18,24 +18,25 @@ load_dotenv()
 # Scopes needed for sending email
 SCOPES = ['https://www.googleapis.com/auth/gmail.send']
 
+
 class EmailService:
     """
     Production-Ready Email Service using Google Gmail API.
     Used for Traditional Sign-up Verification & Password Resets.
     """
-    
+
     def __init__(self):
         self.service = None
-        self.sender_email = os.getenv("GMAIL_SENDER_EMAIL") 
-        self.from_name = os.getenv("FROM_NAME", "Skeduluk")
+        self.sender_email = os.getenv("GMAIL_SENDER_EMAIL")
+        self.from_name = os.getenv("FROM_NAME", "Skeduluk management")
         self._authenticate()
-    
+
     def _authenticate(self):
         """Authenticates with Google (Service Account or User Token)"""
         creds = None
         service_account_path = 'service_account.json'
         token_path = 'token.json'
-        
+
         try:
             if os.path.exists(service_account_path):
                 print("🔐 Authenticating via Service Account...")
@@ -44,8 +45,9 @@ class EmailService:
                 )
             elif os.path.exists(token_path):
                 print("🔐 Authenticating via User Token...")
-                creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-            
+                creds = Credentials.from_authorized_user_file(
+                    token_path, SCOPES)
+
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
 
@@ -54,7 +56,7 @@ class EmailService:
                 print("✅ Gmail API Service Ready")
             else:
                 print("⚠️  No Google Credentials found. Emails will fail.")
-                
+
         except Exception as e:
             print(f"❌ Gmail Auth Failed: {str(e)}")
 
@@ -71,13 +73,14 @@ class EmailService:
             message['subject'] = subject
             message.attach(MIMEText(html_content, 'html'))
 
-            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
-            
+            raw_message = base64.urlsafe_b64encode(
+                message.as_bytes()).decode('utf-8')
+
             self.service.users().messages().send(
-                userId="me", 
+                userId="me",
                 body={'raw': raw_message}
             ).execute()
-            
+
             print(f"✅ Email sent to {to_email} via Gmail API")
             return True
 
@@ -90,7 +93,7 @@ class EmailService:
         try:
             frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
             verification_url = f"{frontend_url}/verify-email?token={verification_token}"
-            
+
             html_template = """
             <div style="font-family: Arial, sans-serif; padding: 20px;">
                 <h2>Welcome to Skeduluk!</h2>
@@ -100,7 +103,7 @@ class EmailService:
             </div>
             """
             html_content = Template(html_template).render(url=verification_url)
-            
+
             return await self.send_email(email, "Verify Your Account", html_content)
         except Exception as e:
             print(f"❌ Verification Logic Error: {e}")
@@ -111,7 +114,7 @@ class EmailService:
         try:
             frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
             reset_url = f"{frontend_url}/reset-password?token={reset_token}"
-            
+
             html_template = """
             <div style="font-family: Arial, sans-serif; padding: 20px;">
                 <h2>Reset Password</h2>
@@ -119,10 +122,11 @@ class EmailService:
             </div>
             """
             html_content = Template(html_template).render(url=reset_url)
-            
+
             return await self.send_email(email, "Reset Your Password", html_content)
         except Exception as e:
             print(f"❌ Reset Logic Error: {e}")
             return False
+
 
 email_service = EmailService()
