@@ -23,8 +23,7 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3001",
-        "https://skeduluk-social.vercel.app", 
-        "https://*.vercel.app", 
+        "https://skeduluk-social.vercel.app",
         "https://www.skeduluk.club"
     ],
     allow_credentials=True,
@@ -41,9 +40,12 @@ app.include_router(social.router)
 app.include_router(payments.router)
 app.include_router(templates.router)
 app.include_router(analytics.router)
+
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to Skeduluk API"}
+
 
 @app.get("/health")
 async def health_check():
