@@ -63,6 +63,11 @@ class User(Base):
         'CURRENT_TIMESTAMP'), onupdate=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
 
+    # Email notification preferences
+    email_on_post_success = Column(Boolean, server_default=text('TRUE'))
+    email_on_post_failure = Column(Boolean, server_default=text('TRUE'))
+    email_weekly_analytics = Column(Boolean, server_default=text('TRUE'))
+
     # Relationships
     social_connections = relationship(
         "SocialConnection", back_populates="user", cascade="all, delete-orphan")

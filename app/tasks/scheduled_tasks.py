@@ -18,7 +18,9 @@ from app.database import create_task_engine, get_async_session_local
 
 from app.crud.post_crud import PostCRUD, PostResultCRUD
 from app.crud.social_connection_crud import SocialConnectionCRUD
+from app.crud.user_crud import UserCRUD
 from app.services.analytics.analytics_service import AnalyticsService
+from app.services.email_service import email_service
 
 
 async def publish_post_async(post_id: int) -> Dict[str, Any]:
@@ -160,6 +162,51 @@ async def publish_post_async(post_id: int) -> Dict[str, Any]:
             print(
                 f"Task completed: {result['successful']}/{result['total_platforms']} platforms succeeded")
             print(f"{'='*60}\n")
+
+            # ============================================
+            # SEND EMAIL NOTIFICATIONS
+            # ============================================
+            try:
+                # Get user for email preferences
+                user = await UserCRUD.get_user_by_id(db, post.user_id)
+
+                if user and user.email:
+                    # Prepare platform results for email
+                    platform_results_for_email = [
+                        {
+                            "platform": r["platform"],
+                            "status": "posted" if r.get("success") else "failed",
+                            "url": r.get("url", "#")
+                        }
+                        for r in result["results"]
+                    ]
+
+                    if final_status in ["posted", "partial"]:
+                        # Send success email if user has preference enabled
+                        if getattr(user, 'email_on_post_success', True):
+                            await email_service.send_post_success_email(
+                                email=user.email,
+                                username=user.username,
+                                post_content=post.original_content,
+                                platform_results=platform_results_for_email
+                            )
+                            print(f"📧 Success email sent to {user.email}")
+                    else:
+                        # Send failure email if user has preference enabled
+                        if getattr(user, 'email_on_post_failure', True):
+                            error_msg = result.get("results", [{}])[0].get(
+                                "error", "Publishing failed")
+                            await email_service.send_post_failure_email(
+                                email=user.email,
+                                username=user.username,
+                                post_content=post.original_content,
+                                error_message=error_msg
+                            )
+                            print(
+                                f"📧 Failure notification sent to {user.email}")
+            except Exception as email_error:
+                print(f"⚠️ Email notification failed: {email_error}")
+                # Don't fail the task if email fails
 
             return result
 

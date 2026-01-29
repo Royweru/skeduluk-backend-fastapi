@@ -37,6 +37,10 @@ class UserResponse(UserBase):
     created_at: Optional[datetime] = None
     auth_provider: Optional[str] = "email"
     last_login_method: Optional[str] = None
+    # Email notification preferences
+    email_on_post_success: bool = True
+    email_on_post_failure: bool = True
+    email_weekly_analytics: bool = True
 
     @field_validator('posts_used', mode='before')
     @classmethod
@@ -52,6 +56,34 @@ class UserResponse(UserBase):
 
     class Config:
         from_attributes = True
+
+
+# Password & Settings Schemas
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator('new_password')
+    def validate_new_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters long')
+        return v
+
+
+class NotificationPreferencesUpdate(BaseModel):
+    email_on_post_success: Optional[bool] = None
+    email_on_post_failure: Optional[bool] = None
+    email_weekly_analytics: Optional[bool] = None
+
+
+class UserStatsResponse(BaseModel):
+    total_posts: int = 0
+    posts_published: int = 0
+    posts_scheduled: int = 0
+    posts_failed: int = 0
+    connected_platforms: int = 0
+    total_engagement: int = 0
+    member_since_days: int = 0
 
 # Authentication schemas
 
