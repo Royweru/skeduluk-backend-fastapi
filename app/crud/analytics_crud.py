@@ -15,7 +15,7 @@ from app import models
 
 class AnalyticsCRUD:
     """Analytics database operations"""
-    
+
     @staticmethod
     async def create_or_update_analytics(
         db: AsyncSession,
@@ -37,12 +37,15 @@ class AnalyticsCRUD:
             )
         )
         analytics = result.scalar_one_or_none()
-        
+
         # Calculate engagement rate
-        engagement = metrics.get('likes', 0) + metrics.get('comments', 0) + metrics.get('shares', 0)
-        impressions = metrics.get('impressions', 0) or metrics.get('views', 0) or 1
-        engagement_rate = (engagement / impressions * 100) if impressions > 0 else 0.0
-        
+        engagement = metrics.get(
+            'likes', 0) + metrics.get('comments', 0) + metrics.get('shares', 0)
+        impressions = metrics.get(
+            'impressions', 0) or metrics.get('views', 0) or 1
+        engagement_rate = (engagement / impressions *
+                           100) if impressions > 0 else 0.0
+
         if analytics:
             # Update existing
             analytics.views = metrics.get('views', 0)
@@ -54,7 +57,8 @@ class AnalyticsCRUD:
             analytics.saves = metrics.get('saves', 0)
             analytics.clicks = metrics.get('clicks', 0)
             analytics.engagement_rate = engagement_rate
-            analytics.platform_specific_metrics = metrics.get('platform_specific', {})
+            analytics.platform_specific_metrics = metrics.get(
+                'platform_specific', {})
             analytics.fetched_at = datetime.utcnow()
             analytics.error = None
         else:
@@ -75,11 +79,11 @@ class AnalyticsCRUD:
                 fetched_at=datetime.utcnow()
             )
             db.add(analytics)
-        
+
         await db.commit()
         await db.refresh(analytics)
         return analytics
-    
+
     @staticmethod
     async def update_error(
         db: AsyncSession,
@@ -97,7 +101,7 @@ class AnalyticsCRUD:
             )
         )
         analytics = result.scalar_one_or_none()
-        
+
         if analytics:
             analytics.error = error_message
             analytics.fetched_at = datetime.utcnow()
@@ -105,7 +109,7 @@ class AnalyticsCRUD:
             await db.refresh(analytics)
             return analytics
         return None
-    
+
     @staticmethod
     async def get_post_analytics(
         db: AsyncSession,
@@ -116,13 +120,13 @@ class AnalyticsCRUD:
         query = select(models.PostAnalytics).where(
             models.PostAnalytics.post_id == post_id
         )
-        
+
         if platform:
             query = query.where(models.PostAnalytics.platform == platform)
-        
+
         result = await db.execute(query)
         return result.scalars().all()
-    
+
     @staticmethod
     async def get_user_analytics_summary(
         db: AsyncSession,
@@ -140,7 +144,7 @@ class AnalyticsCRUD:
             end_date = datetime.utcnow()
         if not start_date:
             start_date = end_date - timedelta(days=30)
-        
+
         # Build query for posts in date range
         posts_query = select(models.Post.id).where(
             and_(
@@ -150,32 +154,40 @@ class AnalyticsCRUD:
                 models.Post.status.in_(['posted', 'partial'])
             )
         )
-        
+
         posts_result = await db.execute(posts_query)
         post_ids = [p[0] for p in posts_result.all()]
-        
+
         if not post_ids:
             return {
                 "total_posts": 0,
                 "total_views": 0,
+                "total_impressions": 0,
+                "total_likes": 0,
+                "total_comments": 0,
+                "total_shares": 0,
                 "total_engagement": 0,
                 "avg_engagement_rate": 0.0,
-                "by_platform": {}
+                "by_platform": {},
+                "date_range": {
+                    "start": start_date.isoformat(),
+                    "end": end_date.isoformat()
+                }
             }
-        
+
         # Get analytics for these posts
         analytics_query = select(models.PostAnalytics).where(
             models.PostAnalytics.post_id.in_(post_ids)
         )
-        
+
         if platform:
             analytics_query = analytics_query.where(
                 models.PostAnalytics.platform == platform
             )
-        
+
         analytics_result = await db.execute(analytics_query)
         analytics_list = analytics_result.scalars().all()
-        
+
         # Aggregate metrics
         total_views = sum(a.views for a in analytics_list)
         total_impressions = sum(a.impressions for a in analytics_list)
@@ -183,12 +195,12 @@ class AnalyticsCRUD:
         total_comments = sum(a.comments for a in analytics_list)
         total_shares = sum(a.shares for a in analytics_list)
         total_engagement = total_likes + total_comments + total_shares
-        
+
         avg_engagement_rate = (
             sum(a.engagement_rate for a in analytics_list) / len(analytics_list)
             if analytics_list else 0.0
         )
-        
+
         # Platform breakdown
         by_platform = {}
         for analytics in analytics_list:
@@ -202,19 +214,19 @@ class AnalyticsCRUD:
                     "shares": 0,
                     "engagement_rate": 0.0
                 }
-            
+
             by_platform[plat]["posts"] += 1
             by_platform[plat]["views"] += analytics.views
             by_platform[plat]["likes"] += analytics.likes
             by_platform[plat]["comments"] += analytics.comments
             by_platform[plat]["shares"] += analytics.shares
             by_platform[plat]["engagement_rate"] += analytics.engagement_rate
-        
+
         # Calculate averages for each platform
         for plat in by_platform:
             count = by_platform[plat]["posts"]
             by_platform[plat]["engagement_rate"] /= count if count > 0 else 1
-        
+
         return {
             "total_posts": len(post_ids),
             "total_views": total_views,
@@ -230,7 +242,7 @@ class AnalyticsCRUD:
                 "end": end_date.isoformat()
             }
         }
-    
+
     @staticmethod
     async def get_top_performing_posts(
         db: AsyncSession,
@@ -245,7 +257,7 @@ class AnalyticsCRUD:
             .join(models.PostAnalytics)
             .where(models.Post.user_id == user_id)
         )
-        
+
         # Order by metric
         if metric == 'engagement_rate':
             query = query.order_by(desc(models.PostAnalytics.engagement_rate))
@@ -253,12 +265,12 @@ class AnalyticsCRUD:
             query = query.order_by(desc(models.PostAnalytics.views))
         elif metric == 'likes':
             query = query.order_by(desc(models.PostAnalytics.likes))
-        
+
         query = query.limit(limit)
-        
+
         result = await db.execute(query)
         rows = result.all()
-        
+
         return [
             {
                 "post_id": post.id,
@@ -273,7 +285,7 @@ class AnalyticsCRUD:
             }
             for post, analytics in rows
         ]
-    
+
     @staticmethod
     async def get_analytics_over_time(
         db: AsyncSession,
@@ -283,7 +295,7 @@ class AnalyticsCRUD:
     ) -> List[Dict[str, Any]]:
         """Get daily analytics aggregated over time"""
         start_date = datetime.utcnow() - timedelta(days=days)
-        
+
         # Get posts in date range
         posts_query = select(models.Post.id).where(
             and_(
@@ -291,13 +303,13 @@ class AnalyticsCRUD:
                 models.Post.created_at >= start_date
             )
         )
-        
+
         posts_result = await db.execute(posts_query)
         post_ids = [p[0] for p in posts_result.all()]
-        
+
         if not post_ids:
             return []
-        
+
         # Get analytics grouped by date
         query = select(
             func.date(models.PostAnalytics.fetched_at).label('date'),
@@ -305,7 +317,8 @@ class AnalyticsCRUD:
             func.sum(models.PostAnalytics.likes).label('likes'),
             func.sum(models.PostAnalytics.comments).label('comments'),
             func.sum(models.PostAnalytics.shares).label('shares'),
-            func.avg(models.PostAnalytics.engagement_rate).label('avg_engagement_rate')
+            func.avg(models.PostAnalytics.engagement_rate).label(
+                'avg_engagement_rate')
         ).where(
             models.PostAnalytics.post_id.in_(post_ids)
         ).group_by(
@@ -313,13 +326,13 @@ class AnalyticsCRUD:
         ).order_by(
             func.date(models.PostAnalytics.fetched_at)
         )
-        
+
         if platform:
             query = query.where(models.PostAnalytics.platform == platform)
-        
+
         result = await db.execute(query)
         rows = result.all()
-        
+
         return [
             {
                 "date": row.date.isoformat(),
@@ -331,6 +344,7 @@ class AnalyticsCRUD:
             }
             for row in rows
         ]
+
 
 class UserAnalyticsSummaryCRUD:
     @staticmethod
