@@ -61,6 +61,7 @@ class AuthService:
         """
         Logs in existing user OR creates new verified user.
         SKIPS email verification.
+        Tracks auth_provider and last_login_method.
         """
         # Check if user exists
         result = await db.execute(select(models.User).where(models.User.email == email))
@@ -70,7 +71,13 @@ class AuthService:
             # Trust Google: Verify them if they weren't already
             if not user.is_email_verified:
                 user.is_email_verified = True
-                await db.commit()
+
+            # ✅ Track login method - always update when logging in via Google
+            user.last_login_method = "google"
+            user.last_login = datetime.utcnow()
+            user.updated_at = datetime.utcnow()
+
+            await db.commit()
             return user
 
         # Create New User (Auto-Verified)
@@ -87,6 +94,9 @@ class AuthService:
             username=unique_username,
             hashed_password=get_password_hash(random_password),
             is_email_verified=True,  # ✅ Auto-verified by Google
+            auth_provider="google",  # ✅ Track original signup method
+            last_login_method="google",  # ✅ Track current login method
+            last_login=datetime.utcnow(),
             plan="trial",
             posts_limit=10
         )
