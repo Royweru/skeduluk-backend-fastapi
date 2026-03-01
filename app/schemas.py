@@ -15,10 +15,10 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
-    @field_validator('password')
+    @field_validator("password")
     def validate_password(cls, v):
         if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters long')
+            raise ValueError("Password must be at least 8 characters long")
         return v
 
 
@@ -42,13 +42,13 @@ class UserResponse(UserBase):
     email_on_post_failure: bool = True
     email_weekly_analytics: bool = True
 
-    @field_validator('posts_used', mode='before')
+    @field_validator("posts_used", mode="before")
     @classmethod
     def validate_posts_used(cls, v):
         """Handle NULL values from database"""
         return v if v is not None else 0
 
-    @field_validator('posts_limit', mode='before')
+    @field_validator("posts_limit", mode="before")
     @classmethod
     def validate_posts_limit(cls, v):
         """Handle NULL values from database"""
@@ -63,10 +63,10 @@ class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
 
-    @field_validator('new_password')
+    @field_validator("new_password")
     def validate_new_password(cls, v):
         if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters long')
+            raise ValueError("Password must be at least 8 characters long")
         return v
 
 
@@ -85,6 +85,7 @@ class UserStatsResponse(BaseModel):
     total_engagement: int = 0
     member_since_days: int = 0
 
+
 # Authentication schemas
 
 
@@ -95,6 +96,7 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username: Optional[str] = None
+
 
 # Social Connection schemas
 
@@ -150,7 +152,7 @@ class PostResponse(PostBase):
     created_at: datetime
     updated_at: datetime
 
-    @field_validator('platforms', 'image_urls', 'video_urls', mode='before')
+    @field_validator("platforms", "image_urls", "video_urls", mode="before")
     @classmethod
     def parse_json_list_fields(cls, v):
         if v is None:
@@ -162,7 +164,7 @@ class PostResponse(PostBase):
                 return []
         return v
 
-    @field_validator('enhanced_content', mode='before')
+    @field_validator("enhanced_content", mode="before")
     @classmethod
     def parse_json_dict_fields(cls, v):
         if v is None:
@@ -201,6 +203,7 @@ class PostResultResponse(PostResultBase):
     class Config:
         from_attributes = True
 
+
 # Subscription schemas
 
 
@@ -230,14 +233,16 @@ class SubscriptionResponse(SubscriptionBase):
 
 # AI Enhancement schemas
 class ContentEnhancementRequest(BaseModel):
-    content: str = Field(..., min_length=1, max_length=10000,
-                         description="Original content to enhance")
-    platforms: List[str] = Field(..., min_items=1,
-                                 description="List of target platforms")
-    image_count: int = Field(default=0, ge=0, le=10,
-                             description="Number of images attached")
-    tone: str = Field(default="engaging",
-                      description="Desired tone for the content")
+    content: str = Field(
+        ..., min_length=1, max_length=10000, description="Original content to enhance"
+    )
+    platforms: List[str] = Field(
+        ..., min_items=1, description="List of target platforms"
+    )
+    image_count: int = Field(
+        default=0, ge=0, le=10, description="Number of images attached"
+    )
+    tone: str = Field(default="engaging", description="Desired tone for the content")
 
     class Config:
         json_schema_extra = {
@@ -245,7 +250,7 @@ class ContentEnhancementRequest(BaseModel):
                 "content": "Just launched our new product!",
                 "platforms": ["TWITTER", "LINKEDIN"],
                 "image_count": 1,
-                "tone": "professional"
+                "tone": "professional",
             }
         }
 
@@ -261,14 +266,15 @@ class ContentEnhancementResponse(BaseModel):
 
 class HashtagsRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
-    count: int = Field(default=5, ge=1, le=20,
-                       description="Number of hashtags to generate")
+    count: int = Field(
+        default=5, ge=1, le=20, description="Number of hashtags to generate"
+    )
 
     class Config:
         schema_extra = {
             "example": {
                 "content": "Excited to share our latest AI-powered features!",
-                "count": 5
+                "count": 5,
             }
         }
 
@@ -290,6 +296,8 @@ class PostTimeResponse(BaseModel):
     platform: str
     day: str
     time: str
+
+
 # Payment schemas
 
 
@@ -301,6 +309,7 @@ class PaymentInitiateRequest(BaseModel):
 class PaymentInitiateResponse(BaseModel):
     payment_link: str
     reference: str
+
 
 # Calendar schemas
 
@@ -347,11 +356,11 @@ class DuplicatePostResponse(BaseModel):
 # TEMPLATE SCHEMAS
 # ============================================================================
 class TemplateVariableDefinition(BaseModel):
-    name: str = Field(...,
-                      description="Variable name without braces, e.g., 'product_name'")
+    name: str = Field(
+        ..., description="Variable name without braces, e.g., 'product_name'"
+    )
     label: str = Field(..., description="Human-readable label")
-    type: str = Field(
-        default="text", description="text, date, number, hashtags, url")
+    type: str = Field(default="text", description="text, date, number, hashtags, url")
     placeholder: str = Field(..., description="Placeholder text")
     required: bool = Field(default=True)
     default_value: Optional[str] = None
@@ -408,7 +417,8 @@ class TemplateResponse(TemplateBase):
 class TemplateUseRequest(BaseModel):
     template_id: int
     variable_values: Optional[Dict[str, str]] = Field(
-        default_factory=dict, description="Key-value pairs for variables")
+        default_factory=dict, description="Key-value pairs for variables"
+    )
     platforms: List[str] = Field(..., min_items=1)
     scheduled_for: Optional[datetime] = None
     use_ai_enhancement: bool = Field(default=False)
@@ -446,7 +456,8 @@ class TemplateSearchRequest(BaseModel):
     include_system: bool = Field(default=True)
     include_community: bool = Field(default=False)
     sort_by: str = Field(
-        default="created_at", description="created_at, usage_count, success_rate, name")
+        default="created_at", description="created_at, usage_count, success_rate, name"
+    )
     sort_order: str = Field(default="desc", description="asc or desc")
     limit: int = Field(default=50, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
@@ -471,6 +482,7 @@ class TemplateAnalyticsResponse(BaseModel):
 # Add these to your existing app/schemas.py file
 
 # ==================== ANALYTICS SCHEMAS ====================
+
 
 class PostAnalyticsBase(BaseModel):
     platform: str
@@ -558,12 +570,14 @@ class FetchAnalyticsResponse(BaseModel):
 
 class ProofreadRequest(BaseModel):
     """Request for proofreading content"""
+
     content: str
     style: Optional[str] = "standard"  # standard, formal, casual
 
 
 class ProofreadResponse(BaseModel):
     """Response from proofreading"""
+
     original_content: str
     corrected_content: str
     corrections_made: bool
@@ -574,14 +588,18 @@ class ProofreadResponse(BaseModel):
 
 # ==================== AI SUGGESTIONS SCHEMAS ====================
 
+
 class AISuggestionRequest(BaseModel):
     """Request for AI engagement suggestions"""
-    days: int = Field(default=30, ge=7, le=365,
-                      description="Days of analytics to analyze")
+
+    days: int = Field(
+        default=30, ge=7, le=365, description="Days of analytics to analyze"
+    )
 
 
 class AISuggestion(BaseModel):
     """Individual AI suggestion"""
+
     category: str  # timing, content, hashtags, platform, engagement, growth
     title: str
     description: str
@@ -591,6 +609,7 @@ class AISuggestion(BaseModel):
 
 class AISuggestionsResponse(BaseModel):
     """Response containing AI engagement suggestions"""
+
     suggestions: List[AISuggestion]
     analyzed_posts: int
     best_performing_platform: Optional[str] = None
@@ -599,18 +618,191 @@ class AISuggestionsResponse(BaseModel):
 
 # ==================== TRANSCRIPTION SCHEMAS ====================
 
+
 class TranscribeRequest(BaseModel):
     """Request for audio transcription (optional, for URL-based transcription)"""
+
     audio_url: Optional[str] = None
     language: Optional[str] = Field(
-        None, description="ISO-639-1 language code (e.g., 'en', 'es')")
+        None, description="ISO-639-1 language code (e.g., 'en', 'es')"
+    )
     prompt: Optional[str] = Field(
-        None, description="Optional text to guide transcription style")
+        None, description="Optional text to guide transcription style"
+    )
 
 
 class TranscribeResponse(BaseModel):
     """Response from audio transcription"""
+
     transcription: str
     language: Optional[str] = None
     duration: Optional[float] = None
     success: bool = True
+
+
+# ==================== VIDEO CAMPAIGN SCHEMAS ====================
+
+
+class ContentSourceBase(BaseModel):
+    source_type: str = Field(..., description="reddit or rss")
+    subreddit_name: Optional[str] = None
+    rss_feed_url: Optional[str] = None
+    keywords_filter: Optional[List[str]] = None
+    exclude_keywords: Optional[List[str]] = None
+    min_score: int = Field(default=100, description="Minimum score for Reddit posts")
+    max_age_hours: int = Field(
+        default=24, description="Maximum age of content in hours"
+    )
+    is_active: bool = True
+    fetch_interval_hours: int = Field(default=6)
+
+
+class ContentSourceCreate(ContentSourceBase):
+    pass
+
+
+class ContentSourceUpdate(BaseModel):
+    subreddit_name: Optional[str] = None
+    rss_feed_url: Optional[str] = None
+    keywords_filter: Optional[List[str]] = None
+    exclude_keywords: Optional[List[str]] = None
+    min_score: Optional[int] = None
+    max_age_hours: Optional[int] = None
+    is_active: Optional[bool] = None
+    fetch_interval_hours: Optional[int] = None
+
+
+class ContentSourceResponse(ContentSourceBase):
+    id: int
+    user_id: int
+    last_fetched: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VideoCampaignBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = None
+    video_style: str = Field(
+        default="ai_images_motion",
+        description="ai_images_motion, template, stock_video",
+    )
+    aspect_ratio: str = Field(default="9:16")
+    duration_seconds: int = Field(default=60, ge=15, le=180)
+    tts_provider: str = Field(default="openai")
+    tts_voice: str = Field(default="alloy")
+    tts_speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    background_music_url: Optional[str] = None
+    music_volume: float = Field(default=0.3, ge=0.0, le=1.0)
+    caption_style: str = Field(default="modern")
+    caption_font: str = Field(default="Montserrat")
+    caption_color: str = Field(default="#FFFFFF")
+    caption_position: str = Field(default="bottom")
+    auto_generate: bool = True
+    videos_per_day: int = Field(default=2, ge=1, le=10)
+    preferred_times: Optional[List[str]] = Field(default=["09:00", "18:00"])
+    platforms: List[str] = Field(..., description="tiktok, instagram, youtube")
+
+
+class VideoCampaignCreate(VideoCampaignBase):
+    content_source_id: Optional[int] = None
+
+
+class VideoCampaignUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    video_style: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    tts_provider: Optional[str] = None
+    tts_voice: Optional[str] = None
+    tts_speed: Optional[float] = None
+    background_music_url: Optional[str] = None
+    music_volume: Optional[float] = None
+    caption_style: Optional[str] = None
+    caption_font: Optional[str] = None
+    caption_color: Optional[str] = None
+    caption_position: Optional[str] = None
+    auto_generate: Optional[bool] = None
+    videos_per_day: Optional[int] = None
+    preferred_times: Optional[List[str]] = None
+    platforms: Optional[List[str]] = None
+    status: Optional[str] = None
+
+
+class VideoCampaignResponse(VideoCampaignBase):
+    id: int
+    user_id: int
+    content_source_id: Optional[int] = None
+    status: str
+    videos_generated: int
+    last_generation: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VideoJobBase(BaseModel):
+    source_url: Optional[str] = None
+    source_title: Optional[str] = None
+    source_content: Optional[str] = None
+
+
+class VideoJobCreate(VideoJobBase):
+    campaign_id: int
+    scheduled_for: Optional[datetime] = None
+
+
+class VideoJobResponse(VideoJobBase):
+    id: int
+    campaign_id: int
+    script_text: Optional[str] = None
+    script_scenes: Optional[List[Dict[str, Any]]] = None
+    narration_url: Optional[str] = None
+    narration_duration: Optional[float] = None
+    image_prompts: Optional[List[str]] = None
+    image_urls: Optional[List[str]] = None
+    video_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    video_duration: Optional[float] = None
+    status: str
+    progress: int
+    error_message: Optional[str] = None
+    platforms: Optional[List[str]] = None
+    platform_post_ids: Optional[Dict[str, str]] = None
+    posted_at: Optional[datetime] = None
+    scheduled_for: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StoryContentResponse(BaseModel):
+    id: int
+    title: str
+    content: str
+    source_type: str
+    source_url: Optional[str] = None
+    author: Optional[str] = None
+    score: int
+    num_comments: int
+    is_used: bool
+    fetched_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GenerateVideoRequest(BaseModel):
+    campaign_id: int
+    story_id: Optional[int] = None
+    custom_content: Optional[str] = None
+    scheduled_for: Optional[datetime] = None
+
+
+class GenerateVideoResponse(BaseModel):
+    job_id: int
+    message: str
+    status: str
