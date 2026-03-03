@@ -1,9 +1,9 @@
 # app/services/platforms/twitter.py
 """
 Twitter/X platform service using OAuth 1.0a with API V1.1 for media uploads.
-✅ FIXED: Proper chunked upload for videos (INIT → APPEND → FINALIZE → STATUS)
-✅ Uses v1.1 endpoint for media (reliable until March 31, 2025)
-✅ Posts tweets using v2 API
+ FIXED: Proper chunked upload for videos (INIT → APPEND → FINALIZE → STATUS)
+ Uses v1.1 endpoint for media (reliable until March 31, 2025)
+ Posts tweets using v2 API
 """
 
 import httpx
@@ -55,12 +55,12 @@ class TwitterService(BasePlatformService):
         Returns:
             Dict with success status, platform_post_id, url, and error (if failed)
         """
-        print(f"\n🐦 Twitter: Starting tweet creation")
+        print(f"\n Twitter: Starting tweet creation")
         
-        # ✅ Validate token format
+        #  Validate token format
         if ':' not in access_token:
             error_msg = "Invalid token format. Expected 'oauth_token:oauth_secret'"
-            print(f"❌ Twitter: {error_msg}")
+            print(f" Twitter: {error_msg}")
             return cls.format_error_response(error_msg)
         
         try:
@@ -82,8 +82,8 @@ class TwitterService(BasePlatformService):
         try:
             from app.config import settings
             
-            # ✅ Create OAuth1 session
-            print(f"🐦 Twitter: Initializing OAuth 1.0a session")
+            #  Create OAuth1 session
+            print(f" Twitter: Initializing OAuth 1.0a session")
             twitter = OAuth1Session(
                 client_key=settings.TWITTER_API_KEY,
                 client_secret=settings.TWITTER_API_SECRET,
@@ -91,41 +91,41 @@ class TwitterService(BasePlatformService):
                 resource_owner_secret=oauth_token_secret
             )
             
-            # ✅ STEP 1: Upload media if present
+            #  STEP 1: Upload media if present
             media_ids = []
             
             # Upload images (simple upload)
             if image_urls:
-                print(f"🐦 Twitter: Uploading {len(image_urls)} images")
+                print(f" Twitter: Uploading {len(image_urls)} images")
                 for idx, image_url in enumerate(image_urls[:cls.MAX_IMAGES], 1):
                     media_id = await cls._upload_image(twitter, image_url, idx)
                     if media_id:
                         media_ids.append(media_id)
-                        print(f"   ✅ Image {idx} uploaded: {media_id}")
+                        print(f"    Image {idx} uploaded: {media_id}")
                     else:
-                        print(f"   ⚠️ Image {idx} upload failed, continuing...")
+                        print(f"    Image {idx} upload failed, continuing...")
             
             # Upload videos (chunked upload - THE FIX)
             if video_urls:
-                print(f"🐦 Twitter: Uploading video using CHUNKED UPLOAD")
+                print(f" Twitter: Uploading video using CHUNKED UPLOAD")
                 video_id = await cls._upload_video_chunked(twitter, video_urls[0])
                 if video_id:
                     media_ids.append(video_id)
-                    print(f"   ✅ Video uploaded: {video_id}")
+                    print(f"    Video uploaded: {video_id}")
                 else:
-                    print(f"   ❌ Video upload failed")
+                    print(f"  Video upload failed")
                     return cls.format_error_response(
                         "Video upload failed. Check logs for details."
                     )
             
-            # ✅ STEP 2: Create tweet using v2 API
+            #  STEP 2: Create tweet using v2 API
             tweet_data = {"text": content}
             
             if media_ids:
                 tweet_data["media"] = {"media_ids": media_ids}
-                print(f"🐦 Twitter: Posting tweet with {len(media_ids)} media attachments")
+                print(f" Twitter: Posting tweet with {len(media_ids)} media attachments")
             else:
-                print(f"🐦 Twitter: Posting text-only tweet")
+                print(f" Twitter: Posting text-only tweet")
             
             # Post tweet
             response = twitter.post(
@@ -134,12 +134,12 @@ class TwitterService(BasePlatformService):
                 timeout=30
             )
             
-            # ✅ Handle response
+            #  Handle response
             if response.status_code == 201:
                 data = response.json()
                 tweet_id = data["data"]["id"]
                 
-                print(f"✅ Twitter: Tweet posted successfully!")
+                print(f" Twitter: Tweet posted successfully!")
                 print(f"   Tweet ID: {tweet_id}")
                 
                 return cls.format_success_response(
@@ -150,7 +150,7 @@ class TwitterService(BasePlatformService):
             elif response.status_code == 401:
                 error_data = response.json() if response.text else {}
                 error_msg = cls._parse_error_message(error_data)
-                print(f"❌ Twitter: 401 Unauthorized - {error_msg}")
+                print(f" Twitter: 401 Unauthorized - {error_msg}")
                 
                 return cls.format_error_response(
                     f"Authentication failed: {error_msg}. "
@@ -160,7 +160,7 @@ class TwitterService(BasePlatformService):
             elif response.status_code == 403:
                 error_data = response.json() if response.text else {}
                 error_msg = cls._parse_error_message(error_data)
-                print(f"❌ Twitter: 403 Forbidden - {error_msg}")
+                print(f" Twitter: 403 Forbidden - {error_msg}")
                 
                 if "Read and write" in error_msg or "permission" in error_msg.lower():
                     return cls.format_error_response(
@@ -171,7 +171,7 @@ class TwitterService(BasePlatformService):
                 return cls.format_error_response(f"Forbidden: {error_msg}")
             
             elif response.status_code == 429:
-                print(f"❌ Twitter: 429 Rate Limit Exceeded")
+                print(f" Twitter: 429 Rate Limit Exceeded")
                 return cls.format_error_response(
                     "Twitter API rate limit exceeded. Please wait a few minutes."
                 )
@@ -179,14 +179,14 @@ class TwitterService(BasePlatformService):
             else:
                 error_data = response.json() if response.text else {}
                 error_msg = cls._parse_error_message(error_data)
-                print(f"❌ Twitter: Error {response.status_code} - {error_msg}")
+                print(f" Twitter: Error {response.status_code} - {error_msg}")
                 
                 return cls.format_error_response(
                     f"Tweet failed ({response.status_code}): {error_msg}"
                 )
                 
         except Exception as e:
-            print(f"❌ Twitter post error: {e}")
+            print(f" Twitter post error: {e}")
             import traceback
             traceback.print_exc()
             return cls.format_error_response(f"Unexpected error: {str(e)}")
@@ -213,7 +213,7 @@ class TwitterService(BasePlatformService):
             print(f"   📥 Downloading image {index}...")
             media_data = await cls.download_media(image_url, timeout=60)
             if not media_data:
-                print(f"   ❌ Failed to download image")
+                print(f"  Failed to download image")
                 return None
             
             media_size_mb = len(media_data) / (1024 * 1024)
@@ -241,12 +241,12 @@ class TwitterService(BasePlatformService):
                 data = response.json()
                 return data.get("media_id_string")
             else:
-                print(f"   ❌ Image upload failed: {response.status_code}")
-                print(f"   ❌ Response: {response.text[:200]}")
+                print(f"  Image upload failed: {response.status_code}")
+                print(f"  Response: {response.text[:200]}")
                 return None
                 
         except Exception as e:
-            print(f"   ❌ Image upload error: {e}")
+            print(f"  Image upload error: {e}")
             return None
     
     @classmethod
@@ -256,7 +256,7 @@ class TwitterService(BasePlatformService):
         video_url: str
     ) -> Optional[str]:
         """
-        ✅ MAIN FIX: Upload video using proper chunked upload process.
+         MAIN FIX: Upload video using proper chunked upload process.
         
         This is the correct way to upload videos to Twitter:
         1. INIT - Initialize upload with file size and type
@@ -276,7 +276,7 @@ class TwitterService(BasePlatformService):
             print(f"   📥 Downloading video...")
             video_data = await cls.download_media(video_url, timeout=180)
             if not video_data:
-                print(f"   ❌ Failed to download video")
+                print(f"  Failed to download video")
                 return None
             
             video_size = len(video_data)
@@ -285,7 +285,7 @@ class TwitterService(BasePlatformService):
             
             # Validate size
             if video_size_mb > cls.MAX_VIDEO_SIZE_MB:
-                print(f"   ❌ Video too large: {video_size_mb:.2f}MB (max {cls.MAX_VIDEO_SIZE_MB}MB)")
+                print(f"  Video too large: {video_size_mb:.2f}MB (max {cls.MAX_VIDEO_SIZE_MB}MB)")
                 return None
             
             # Determine media type
@@ -295,7 +295,7 @@ class TwitterService(BasePlatformService):
             # ========================================================
             # STEP 1: INIT - Initialize chunked upload
             # ========================================================
-            print(f"   📤 INIT: Initializing chunked upload...")
+            print(f"    INIT: Initializing chunked upload...")
             
             init_data = {
                 "command": "INIT",
@@ -311,23 +311,23 @@ class TwitterService(BasePlatformService):
             )
             
             if init_response.status_code != 200 and init_response.status_code != 201:
-                print(f"   ❌ INIT failed: {init_response.status_code}")
-                print(f"   ❌ Response: {init_response.text}")
+                print(f"  INIT failed: {init_response.status_code}")
+                print(f"  Response: {init_response.text}")
                 return None
             
             init_result = init_response.json()
             media_id = init_result.get("media_id_string")
             
             if not media_id:
-                print(f"   ❌ No media_id received from INIT")
+                print(f"  No media_id received from INIT")
                 return None
             
-            print(f"   ✅ INIT successful. Media ID: {media_id}")
+            print(f"    INIT successful. Media ID: {media_id}")
             
             # ========================================================
             # STEP 2: APPEND - Upload video in chunks
             # ========================================================
-            print(f"   📤 APPEND: Uploading video in chunks...")
+            print(f"    APPEND: Uploading video in chunks...")
             
             segment_index = 0
             bytes_sent = 0
@@ -362,21 +362,21 @@ class TwitterService(BasePlatformService):
                 
                 # APPEND returns 204 No Content on success
                 if append_response.status_code not in [200, 201, 204]:
-                    print(f"   ❌ APPEND failed at segment {segment_index}: {append_response.status_code}")
-                    print(f"   ❌ Response: {append_response.text}")
+                    print(f"  APPEND failed at segment {segment_index}: {append_response.status_code}")
+                    print(f"  Response: {append_response.text}")
                     return None
                 
-                print(f"   ✅ Chunk {segment_index + 1} uploaded successfully")
+                print(f"    Chunk {segment_index + 1} uploaded successfully")
                 
                 bytes_sent += chunk_size
                 segment_index += 1
             
-            print(f"   ✅ All {segment_index} chunks uploaded")
+            print(f"    All {segment_index} chunks uploaded")
             
             # ========================================================
             # STEP 3: FINALIZE - Complete the upload
             # ========================================================
-            print(f"   📤 FINALIZE: Completing upload...")
+            print(f"    FINALIZE: Completing upload...")
             
             finalize_data = {
                 "command": "FINALIZE",
@@ -390,12 +390,12 @@ class TwitterService(BasePlatformService):
             )
             
             if finalize_response.status_code != 200 and finalize_response.status_code != 201:
-                print(f"   ❌ FINALIZE failed: {finalize_response.status_code}")
-                print(f"   ❌ Response: {finalize_response.text}")
+                print(f"  FINALIZE failed: {finalize_response.status_code}")
+                print(f"  Response: {finalize_response.text}")
                 return None
             
             finalize_result = finalize_response.json()
-            print(f"   ✅ FINALIZE successful")
+            print(f"    FINALIZE successful")
             
             # ========================================================
             # STEP 4: STATUS - Wait for processing (if needed)
@@ -404,7 +404,7 @@ class TwitterService(BasePlatformService):
             
             if processing_info:
                 state = processing_info.get("state")
-                print(f"   ⏳ Video processing: {state}")
+                print(f"   Video processing: {state}")
                 
                 # Wait for processing to complete
                 max_wait_time = 300  # 5 minutes
@@ -414,11 +414,11 @@ class TwitterService(BasePlatformService):
                 while state in ["pending", "in_progress"]:
                     # Check if we've waited too long
                     if time.time() - start_time > max_wait_time:
-                        print(f"   ❌ Video processing timeout after {max_wait_time}s")
+                        print(f"  Video processing timeout after {max_wait_time}s")
                         return None
                     
                     # Wait before checking status
-                    print(f"   ⏳ Waiting {check_after_secs}s before status check...")
+                    print(f"   Waiting {check_after_secs}s before status check...")
                     await asyncio.sleep(check_after_secs)
                     
                     # Check status
@@ -434,7 +434,7 @@ class TwitterService(BasePlatformService):
                     )
                     
                     if status_response.status_code != 200:
-                        print(f"   ❌ STATUS check failed: {status_response.status_code}")
+                        print(f"  STATUS check failed: {status_response.status_code}")
                         return None
                     
                     status_result = status_response.json()
@@ -442,22 +442,22 @@ class TwitterService(BasePlatformService):
                     state = processing_info.get("state")
                     check_after_secs = processing_info.get("check_after_secs", 5)
                     
-                    print(f"   ⏳ Processing state: {state}")
+                    print(f"   Processing state: {state}")
                 
                 # Check final state
                 if state == "succeeded":
-                    print(f"   ✅ Video processing completed successfully")
+                    print(f"    Video processing completed successfully")
                 elif state == "failed":
                     error = processing_info.get("error", {})
                     error_msg = error.get("message", "Unknown error")
-                    print(f"   ❌ Video processing failed: {error_msg}")
+                    print(f"  Video processing failed: {error_msg}")
                     return None
             
             print(f"   🎉 Video upload complete! Media ID: {media_id}")
             return media_id
             
         except Exception as e:
-            print(f"   ❌ Video upload error: {e}")
+            print(f"  Video upload error: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -503,7 +503,7 @@ class TwitterService(BasePlatformService):
         """
         try:
             if ':' not in access_token:
-                print(f"🐦 Twitter: Invalid token format")
+                print(f" Twitter: Invalid token format")
                 return False
             
             from app.config import settings
@@ -525,13 +525,13 @@ class TwitterService(BasePlatformService):
             is_valid = response.status_code == 200
             
             if not is_valid:
-                print(f"🐦 Twitter: Token validation failed - {response.status_code}")
+                print(f" Twitter: Token validation failed - {response.status_code}")
                 print(f"   Response: {response.text[:200]}")
             
             return is_valid
             
         except Exception as e:
-            print(f"🐦 Twitter: Token validation error - {e}")
+            print(f" Twitter: Token validation error - {e}")
             return False
     
    

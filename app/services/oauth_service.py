@@ -478,7 +478,7 @@ class OAuthService:
             # ⚠️ CRITICAL FIX: follow_redirects=True to handle potential 301/308 redirects from TikTok
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 print(
-                    f"🔄 Exchanging code for token with {config['token_url']}")
+                    f" Exchanging code for token with {config['token_url']}")
                 token_response = await client.post(
                     config["token_url"],
                     data=token_params,
